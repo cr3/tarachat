@@ -170,9 +170,18 @@ class DocumentManager:
         logger.info("Rebuilding vector store...")
 
         # Create new empty vector store
-        dummy_doc = Document(page_content="Initial document", metadata={})
-        from langchain_community.vectorstores import FAISS
-        self.rag_system.vector_store = FAISS.from_documents([dummy_doc], self.rag_system.embeddings)
+        import faiss
+        from langchain_community.vectorstores import FAISS as FAISSStore
+        from langchain_community.docstore.in_memory import InMemoryDocstore
+        sample_embedding = self.rag_system.embeddings.embed_query("sample")
+        dimension = len(sample_embedding)
+        index = faiss.IndexFlatL2(dimension)
+        self.rag_system.vector_store = FAISSStore(
+            embedding_function=self.rag_system.embeddings,
+            index=index,
+            docstore=InMemoryDocstore({}),
+            index_to_docstore_id={},
+        )
 
         # Re-add all documents from metadata
         # Note: This requires storing original content, which we don't have in current implementation
@@ -208,9 +217,18 @@ class DocumentManager:
         logger.info("Clearing vector store...")
 
         # Create new empty vector store
-        dummy_doc = Document(page_content="Initial document", metadata={})
-        from langchain_community.vectorstores import FAISS
-        self.rag_system.vector_store = FAISS.from_documents([dummy_doc], self.rag_system.embeddings)
+        import faiss
+        from langchain_community.vectorstores import FAISS as FAISSStore
+        from langchain_community.docstore.in_memory import InMemoryDocstore
+        sample_embedding = self.rag_system.embeddings.embed_query("sample")
+        dimension = len(sample_embedding)
+        index = faiss.IndexFlatL2(dimension)
+        self.rag_system.vector_store = FAISSStore(
+            embedding_function=self.rag_system.embeddings,
+            index=index,
+            docstore=InMemoryDocstore({}),
+            index_to_docstore_id={},
+        )
 
         # Save empty vector store
         vector_store_path = Path(self.rag_system.settings.vector_store_path)
