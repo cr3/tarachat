@@ -19,14 +19,12 @@ COPY pyproject.toml ./
 # Configure poetry to not create virtual environments
 RUN poetry config virtualenvs.create false
 
-# Install dependencies
-RUN poetry install --no-interaction --no-ansi --no-root
+# Install dependencies (no dev deps in production)
+RUN poetry install --no-interaction --no-ansi --no-root --without dev
 
 # Copy application code
 COPY . .
 
-# Expose port
 EXPOSE 8000
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

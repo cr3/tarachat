@@ -1,11 +1,14 @@
-.PHONY: help build up down logs clean init-data ingest-docs list-docs clear-docs
+.PHONY: help build up down dev logs clean init-data ingest-docs list-docs clear-docs
+
+COMPOSE_DEV = docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
 help:
 	@echo "TaraChat - RAG Chatbot"
 	@echo ""
 	@echo "Available commands:"
-	@echo "  make build       - Build Docker images"
-	@echo "  make up          - Start the application"
+	@echo "  make build       - Build Docker images (production)"
+	@echo "  make up          - Start the application (production)"
+	@echo "  make dev         - Start the application (development with hot-reload)"
 	@echo "  make down        - Stop the application"
 	@echo "  make logs        - View logs"
 	@echo "  make clean       - Clean up containers and volumes"
@@ -25,7 +28,15 @@ build:
 up:
 	docker compose up -d
 	@echo ""
-	@echo "Application started!"
+	@echo "Application started! (production)"
+	@echo "Frontend: http://localhost"
+	@echo "Backend: http://localhost:8000"
+	@echo "API Docs: http://localhost:8000/docs"
+
+dev:
+	$(COMPOSE_DEV) up -d
+	@echo ""
+	@echo "Application started! (development)"
 	@echo "Frontend: http://localhost:5173"
 	@echo "Backend: http://localhost:8000"
 	@echo "API Docs: http://localhost:8000/docs"
