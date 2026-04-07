@@ -10,6 +10,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain.docstore.document import Document
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
+import faiss
 import torch
 from threading import Thread
 
@@ -63,9 +64,7 @@ class RAGSystem:
         else:
             logger.info("Creating new empty vector store...")
             # Create an empty FAISS index using the embedding dimension
-            import faiss
-            import numpy as np
-            sample_embedding = self.embeddings.embed_query("sample")
+            sample_embedding= self.embeddings.embed_query("sample")
             dimension = len(sample_embedding)
             index = faiss.IndexFlatL2(dimension)
             self.vector_store = FAISS(
