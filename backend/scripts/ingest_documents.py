@@ -40,6 +40,7 @@ Note: PDF files are automatically processed to extract text content and metadata
 import sys
 import os
 import json
+import sqlite3
 import argparse
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -57,108 +58,127 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentManager:
-    """Manages document ingestion and updates in the vector store."""
+    """Manages document ingestion and updates in the vector store using SQLite."""
 
     def __init__(self):
         self.rag_system = rag_system
-        self.metadata_file = Path(rag_system.settings.vector_store_path) / "documents_metadata.json"
-        self.documents_metadata = self._load_metadata()
+        self.db_path = Path(rag_system.settings.vector_store_path) / "documents.db"
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+        self._migrate_from_json()
+
+    def _init_db(self):
+        """Initialize the SQLite database."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    content_length INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+    def _migrate_from_json(self):
+        """Migrate existing documents_metadata.json to SQLite if present."""
+        json_path = Path(self.rag_system.settings.vector_store_path) / "documents_metadata.json"
+        if not json_path.exists():
+            return
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                old_metadata = json.load(f)
+
+            if old_metadata:
+                with sqlite3.connect(self.db_path) as conn:
+                    for doc_id, info in old_metadata.items():
+                        conn.execute(
+                            "INSERT OR IGNORE INTO documents (id, content, metadata, content_length) VALUES (?, ?, ?, ?)",
+                            (doc_id, "", json.dumps(info.get('metadata', {})), info.get('content_length', 0))
+                        )
+                    conn.commit()
+                logger.info(f"Migrated {len(old_metadata)} documents from JSON to SQLite")
+
+            # Rename old file to mark it as migrated
+            json_path.rename(json_path.with_suffix('.json.bak'))
+        except Exception as e:
+            logger.warning(f"Failed to migrate from JSON: {e}")
 
     def _read_file_content(self, file_path: Path) -> tuple[str, Dict]:
-        """
-        Read content from a file, supporting both text and PDF formats.
-
-        Args:
-            file_path: Path to the file to read
-
-        Returns:
-            Tuple of (content, extracted_metadata)
-        """
+        """Read content from a file, supporting both text and PDF formats."""
         file_extension = file_path.suffix.lower()
 
         if file_extension == '.pdf':
-            # Read PDF using pdf_processor
             with open(file_path, 'rb') as f:
                 pdf_bytes = f.read()
             content, pdf_metadata = pdf_processor.extract_text_from_pdf(pdf_bytes)
             return content, pdf_metadata
         else:
-            # Read as text file
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             return content, {}
 
-    def _load_metadata(self) -> Dict:
-        """Load document metadata from JSON file."""
-        if self.metadata_file.exists():
-            with open(self.metadata_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
-
-    def _save_metadata(self):
-        """Save document metadata to JSON file."""
-        self.metadata_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(self.documents_metadata, f, indent=2, ensure_ascii=False)
+    def _doc_exists(self, doc_id: str) -> bool:
+        """Check if a document exists in the database."""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT 1 FROM documents WHERE id = ?", (doc_id,)).fetchone()
+            return row is not None
 
     def add_document(self, doc_id: str, content: str, metadata: Optional[Dict] = None):
         """Add a new document to the vector store."""
-        if doc_id in self.documents_metadata:
+        if self._doc_exists(doc_id):
             logger.warning(f"Document '{doc_id}' already exists. Use 'update' to modify it.")
             return False
 
-        # Prepare metadata
         doc_metadata = metadata or {}
         doc_metadata['doc_id'] = doc_id
 
-        # Add to vector store
         logger.info(f"Adding document '{doc_id}' to vector store...")
         self.rag_system.add_documents([content], [doc_metadata])
 
-        # Save metadata
-        self.documents_metadata[doc_id] = {
-            'metadata': doc_metadata,
-            'content_preview': content[:200] + '...' if len(content) > 200 else content,
-            'content_length': len(content)
-        }
-        self._save_metadata()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO documents (id, content, metadata, content_length) VALUES (?, ?, ?, ?)",
+                (doc_id, content, json.dumps(doc_metadata), len(content))
+            )
+            conn.commit()
 
         logger.info(f"✓ Document '{doc_id}' added successfully")
         return True
 
     def update_document(self, doc_id: str, content: str, metadata: Optional[Dict] = None):
         """Update an existing document by deleting and re-adding it."""
-        if doc_id not in self.documents_metadata:
+        if not self._doc_exists(doc_id):
             logger.error(f"Document '{doc_id}' not found. Use 'add' to create it.")
             return False
 
         logger.info(f"Updating document '{doc_id}'...")
 
-        # Delete old version
-        self.delete_document(doc_id, silent=True)
+        # Get existing metadata as fallback
+        if metadata is None:
+            with sqlite3.connect(self.db_path) as conn:
+                row = conn.execute("SELECT metadata FROM documents WHERE id = ?", (doc_id,)).fetchone()
+                metadata = json.loads(row[0]) if row else {}
 
-        # Add new version
-        doc_metadata = metadata or self.documents_metadata.get(doc_id, {}).get('metadata', {})
-        return self.add_document(doc_id, content, doc_metadata)
+        self.delete_document(doc_id, silent=True)
+        return self.add_document(doc_id, content, metadata)
 
     def delete_document(self, doc_id: str, silent: bool = False):
         """Delete a document from the vector store."""
-        if doc_id not in self.documents_metadata:
+        if not self._doc_exists(doc_id):
             if not silent:
                 logger.error(f"Document '{doc_id}' not found")
             return False
 
         logger.info(f"Deleting document '{doc_id}'...")
-
-        # FAISS doesn't support deletion, so we need to rebuild without this document
-        # This is a limitation - for production, consider using a different vector store
         logger.warning("FAISS doesn't support direct deletion. Rebuilding vector store...")
 
-        # Remove from metadata
-        del self.documents_metadata[doc_id]
-        self._save_metadata()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+            conn.commit()
 
-        # Rebuild vector store without this document
         self._rebuild_vector_store()
 
         if not silent:
@@ -166,10 +186,9 @@ class DocumentManager:
         return True
 
     def _rebuild_vector_store(self):
-        """Rebuild the entire vector store from metadata."""
+        """Rebuild the entire vector store from stored content."""
         logger.info("Rebuilding vector store...")
 
-        # Create new empty vector store
         import faiss
         from langchain_community.vectorstores import FAISS as FAISSStore
         from langchain_community.docstore.in_memory import InMemoryDocstore
@@ -183,26 +202,40 @@ class DocumentManager:
             index_to_docstore_id={},
         )
 
-        # Re-add all documents from metadata
-        # Note: This requires storing original content, which we don't have in current implementation
-        logger.warning("Full rebuild requires original document content. Consider implementing content storage.")
-        logger.info("✓ Vector store cleared. Re-add documents using the 'add' command.")
+        # Re-add all remaining documents from SQLite
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("SELECT id, content, metadata FROM documents").fetchall()
+
+        if rows:
+            texts = [row[1] for row in rows]
+            metadatas = [json.loads(row[2]) for row in rows]
+            self.rag_system.add_documents(texts, metadatas)
+            logger.info(f"✓ Rebuilt vector store with {len(rows)} documents")
+        else:
+            # Save empty vector store
+            vector_store_path = Path(self.rag_system.settings.vector_store_path)
+            self.rag_system.vector_store.save_local(str(vector_store_path))
+            logger.info("✓ Vector store cleared (no documents remaining)")
 
     def list_documents(self):
         """List all documents in the vector store."""
-        if not self.documents_metadata:
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("SELECT id, content_length, metadata, content FROM documents").fetchall()
+
+        if not rows:
             logger.info("No documents in vector store")
             return
 
         logger.info(f"\n{'='*80}")
-        logger.info(f"Documents in vector store: {len(self.documents_metadata)}")
+        logger.info(f"Documents in vector store: {len(rows)}")
         logger.info(f"{'='*80}\n")
 
-        for doc_id, info in self.documents_metadata.items():
+        for doc_id, content_length, metadata_json, content in rows:
+            preview = content[:200] + '...' if len(content) > 200 else content
             logger.info(f"ID: {doc_id}")
-            logger.info(f"  Length: {info['content_length']} characters")
-            logger.info(f"  Metadata: {info['metadata']}")
-            logger.info(f"  Preview: {info['content_preview']}")
+            logger.info(f"  Length: {content_length} characters")
+            logger.info(f"  Metadata: {metadata_json}")
+            logger.info(f"  Preview: {preview}")
             logger.info("")
 
     def clear_all(self):
@@ -216,7 +249,6 @@ class DocumentManager:
 
         logger.info("Clearing vector store...")
 
-        # Create new empty vector store
         import faiss
         from langchain_community.vectorstores import FAISS as FAISSStore
         from langchain_community.docstore.in_memory import InMemoryDocstore
@@ -230,14 +262,13 @@ class DocumentManager:
             index_to_docstore_id={},
         )
 
-        # Save empty vector store
         vector_store_path = Path(self.rag_system.settings.vector_store_path)
         vector_store_path.mkdir(parents=True, exist_ok=True)
         self.rag_system.vector_store.save_local(str(vector_store_path))
 
-        # Clear metadata
-        self.documents_metadata = {}
-        self._save_metadata()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM documents")
+            conn.commit()
 
         logger.info("✓ Vector store cleared")
 
