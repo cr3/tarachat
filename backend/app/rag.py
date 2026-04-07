@@ -6,6 +6,7 @@ from pathlib import Path
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain.docstore.document import Document
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
@@ -58,10 +59,19 @@ class RAGSystem:
                     self.embeddings
                 )
         else:
-            logger.info("Creating new vector store...")
-            # Create empty vector store with dummy document
-            dummy_doc = Document(page_content="Initial document", metadata={})
-            self.vector_store = FAISS.from_documents([dummy_doc], self.embeddings)
+            logger.info("Creating new empty vector store...")
+            # Create an empty FAISS index using the embedding dimension
+            import faiss
+            import numpy as np
+            sample_embedding = self.embeddings.embed_query("sample")
+            dimension = len(sample_embedding)
+            index = faiss.IndexFlatL2(dimension)
+            self.vector_store = FAISS(
+                embedding_function=self.embeddings,
+                index=index,
+                docstore=InMemoryDocstore({}),
+                index_to_docstore_id={},
+            )
             vector_store_path.mkdir(parents=True, exist_ok=True)
             self.vector_store.save_local(str(vector_store_path))
 
@@ -120,6 +130,9 @@ class RAGSystem:
         """Retrieve relevant documents for a query."""
         if k is None:
             k = self.settings.top_k
+
+        if self.vector_store.index.ntotal == 0:
+            return []
 
         results = self.vector_store.similarity_search(query, k=k)
         return results
