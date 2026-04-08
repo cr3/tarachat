@@ -1,11 +1,14 @@
+
 import json
 import logging
 from collections.abc import Generator
 from pathlib import Path
 from threading import Thread
+from typing import Any, Protocol, runtime_checkable
 
 import faiss
 import torch
+from attrs import define
 from langchain.docstore.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.docstore.in_memory import InMemoryDocstore
@@ -13,9 +16,34 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
-from tarachat.config import Settings, get_settings
+from tarachat.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class RAGProtocol(Protocol):
+    """Public interface for the RAG system.
+
+    Implemented by RAGSystem (production) and FakeRAGSystem (tests).
+    """
+
+    model: Any
+    vector_store: Any
+
+    def add_documents(
+        self, texts: list[str], metadatas: list[dict] | None = None,
+    ) -> None: ...
+
+    def retrieve_documents(
+        self, query: str, k: int | None = None,
+    ) -> list[Document]: ...
+
+    def chat(
+        self, message: str, conversation_history: list[dict] | None = None,
+    ) -> Generator[str, None, None]: ...
+
+    def create_empty_vector_store(self) -> Any: ...
 
 
 def _detect_device() -> str:
@@ -23,78 +51,91 @@ def _detect_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _create_empty_vector_store(embeddings: HuggingFaceEmbeddings) -> FAISS:
+    """Create a new empty FAISS vector store."""
+    sample_embedding = embeddings.embed_query("sample")
+    dimension = len(sample_embedding)
+    index = faiss.IndexFlatL2(dimension)
+    return FAISS(
+        embedding_function=embeddings,
+        index=index,
+        docstore=InMemoryDocstore({}),
+        index_to_docstore_id={},
+    )
+
+
+def _load_vector_store(
+    path: Path, embeddings: HuggingFaceEmbeddings,
+) -> FAISS:
+    """Load an existing vector store or create a new empty one."""
+    if path.exists() and (path / "index.faiss").exists():
+        logger.info("Loading existing vector store...")
+        try:
+            return FAISS.load_local(
+                str(path), embeddings, allow_dangerous_deserialization=True,
+            )
+        except TypeError:
+            logger.info("Using older FAISS.load_local signature...")
+            return FAISS.load_local(str(path), embeddings)
+
+    logger.info("Creating new empty vector store...")
+    vector_store = _create_empty_vector_store(embeddings)
+    path.mkdir(parents=True, exist_ok=True)
+    vector_store.save_local(str(path))
+    return vector_store
+
+
+@define
 class RAGSystem:
     """RAG system using CroissantLLM and FAISS."""
 
-    def __init__(self, settings: Settings | None = None, device: str | None = None):
-        self.settings = settings or get_settings()
-        self.embeddings = None
-        self.vector_store = None
-        self.tokenizer = None
-        self.model = None
-        self.device = device or _detect_device()
+    settings: Settings
+    device: str
+    embeddings: Any
+    vector_store: Any
+    tokenizer: Any
+    model: Any
 
-        logger.info(f"Using device: {self.device}")
+    @classmethod
+    def create(cls, settings: Settings, device: str) -> "RAGSystem":
+        """Create a fully initialized RAG system."""
+        logger.info(f"Using device: {device}")
+        logger.info("Initializing RAG system...")
+
+        logger.info(f"Loading embedding model: {settings.embedding_model}")
+        embeddings = HuggingFaceEmbeddings(
+            model_name=settings.embedding_model,
+            model_kwargs={"device": device},
+        )
+
+        vector_store = _load_vector_store(
+            Path(settings.vector_store_path), embeddings,
+        )
+
+        logger.info(f"Loading language model: {settings.model_name}")
+        tokenizer = AutoTokenizer.from_pretrained(settings.model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            settings.model_name,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map="auto" if device == "cuda" else None,
+            low_cpu_mem_usage=True,
+        )
+        if device == "cpu":
+            model = model.to(device)
+
+        logger.info("RAG system initialized successfully")
+        return cls(
+            settings=settings,
+            device=device,
+            embeddings=embeddings,
+            vector_store=vector_store,
+            tokenizer=tokenizer,
+            model=model,
+        )
 
     def create_empty_vector_store(self) -> FAISS:
         """Create a new empty FAISS vector store."""
-        sample_embedding = self.embeddings.embed_query("sample")
-        dimension = len(sample_embedding)
-        index = faiss.IndexFlatL2(dimension)
-        return FAISS(
-            embedding_function=self.embeddings,
-            index=index,
-            docstore=InMemoryDocstore({}),
-            index_to_docstore_id={},
-        )
-
-    def initialize(self):
-        """Initialize the RAG system components."""
-        logger.info("Initializing RAG system...")
-
-        # Initialize embeddings
-        logger.info(f"Loading embedding model: {self.settings.embedding_model}")
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=self.settings.embedding_model,
-            model_kwargs={'device': self.device}
-        )
-
-        # Initialize or load vector store
-        vector_store_path = Path(self.settings.vector_store_path)
-        if vector_store_path.exists() and (vector_store_path / "index.faiss").exists():
-            logger.info("Loading existing vector store...")
-            try:
-                self.vector_store = FAISS.load_local(
-                    str(vector_store_path),
-                    self.embeddings,
-                    allow_dangerous_deserialization=True
-                )
-            except TypeError:
-                logger.info("Using older FAISS.load_local signature...")
-                self.vector_store = FAISS.load_local(
-                    str(vector_store_path),
-                    self.embeddings
-                )
-        else:
-            logger.info("Creating new empty vector store...")
-            self.vector_store = self.create_empty_vector_store()
-            vector_store_path.mkdir(parents=True, exist_ok=True)
-            self.vector_store.save_local(str(vector_store_path))
-
-        # Initialize LLM
-        logger.info(f"Loading language model: {self.settings.model_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.settings.model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.settings.model_name,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            device_map="auto" if self.device == "cuda" else None,
-            low_cpu_mem_usage=True
-        )
-
-        if self.device == "cpu":
-            self.model = self.model.to(self.device)
-
-        logger.info("RAG system initialized successfully")
+        return _create_empty_vector_store(self.embeddings)
 
     def add_documents(self, texts: list[str], metadatas: list[dict] | None = None):
         """Add documents to the vector store."""
@@ -134,9 +175,6 @@ class RAGSystem:
 
     def retrieve_documents(self, query: str, k: int | None = None) -> list[Document]:
         """Retrieve relevant documents for a query."""
-        if self.vector_store is None:
-            return []
-
         if k is None:
             k = self.settings.top_k
 
@@ -215,47 +253,14 @@ Réponse :"""
             "pad_token_id": self.tokenizer.eos_token_id,
         }
 
-    def generate_response(
+    def _stream_tokens(
         self,
         query: str,
         context_docs: list[Document],
         conversation_history: list[dict] | None = None,
-        max_length: int | None = None
-    ) -> str:
-        """Generate a response using the LLM with context."""
-        if max_length is None:
-            max_length = self.settings.max_tokens
-
-        prompt = self._build_prompt(query, context_docs, conversation_history)
-        inputs = self._tokenize_prompt(prompt)
-
-        logger.info(f"Generating response for query: {query[:50]}...")
-
-        with torch.no_grad():
-            outputs = self.model.generate(**self._generation_kwargs(inputs, max_length))
-
-        logger.info("Response generation complete")
-
-        # Decode
-        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        # Extract only the generated response (after the prompt)
-        if "Réponse :" in response:
-            response = response.split("Réponse :")[-1].strip()
-
-        return response
-
-    def generate_response_stream(
-        self,
-        query: str,
-        context_docs: list[Document],
-        conversation_history: list[dict] | None = None,
-        max_length: int | None = None,
     ) -> Generator[str, None, None]:
         """Generate a streaming response, yielding tokens as they are produced."""
-        if max_length is None:
-            max_length = self.settings.max_tokens
-
+        max_length = self.settings.max_tokens
         prompt = self._build_prompt(query, context_docs, conversation_history)
         inputs = self._tokenize_prompt(prompt)
 
@@ -269,22 +274,7 @@ Réponse :"""
 
         thread.join()
 
-    def chat(self, message: str, conversation_history: list[dict] | None = None) -> tuple[str, list[str]]:
-        """Process a chat message with RAG."""
-
-        # Retrieve relevant documents
-        docs = self.retrieve_documents(message)
-
-        if self.settings.demo_mode:
-            logger.info("Using demo mode (fast RAG-only responses)")
-            return self._build_demo_response(docs), self._extract_sources(docs)
-
-        # Normal mode: Full LLM generation (slow on CPU)
-        logger.info("Using full LLM mode (slow on CPU without GPU)")
-        response = self.generate_response(message, docs, conversation_history)
-        return response, self._extract_sources(docs)
-
-    def chat_stream(self, message: str, conversation_history: list[dict] | None = None) -> Generator[str, None, None]:
+    def chat(self, message: str, conversation_history: list[dict] | None = None) -> Generator[str, None, None]:
         """Process a chat message with RAG, yielding SSE events as tokens stream."""
         docs = self.retrieve_documents(message)
         sources = self._extract_sources(docs)
@@ -299,21 +289,8 @@ Réponse :"""
 
         # Normal mode: stream tokens
         logger.info("Using full LLM mode with streaming")
-        for token in self.generate_response_stream(message, docs, conversation_history):
+        for token in self._stream_tokens(message, docs, conversation_history):
             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
         yield "data: [DONE]\n\n"
-
-    def is_ready(self) -> bool:
-        """Check if the RAG system is ready."""
-        return (
-            self.embeddings is not None
-            and self.vector_store is not None
-            and self.model is not None
-            and self.tokenizer is not None
-        )
-
-
-# Global RAG system instance
-rag_system = RAGSystem()

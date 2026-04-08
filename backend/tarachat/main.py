@@ -1,40 +1,30 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from tarachat.config import get_settings
 from tarachat.models import ChatRequest, HealthResponse
-from tarachat.protocols import RAGProtocol
-from tarachat.rag import rag_system
+from tarachat.rag import RAGProtocol, RAGSystem, _detect_device
 
 logger = logging.getLogger(__name__)
 
 
-def get_rag_system() -> RAGProtocol:
+def get_rag_system(request: Request) -> RAGProtocol:
     """Dependency that provides the RAG system instance."""
-    return rag_system
+    return request.app.state.rag
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the FastAPI app."""
-    resolve = app.dependency_overrides.get(get_rag_system, get_rag_system)
-    rag = resolve()
-
-    logger.info("Starting up application...")
-    try:
-        rag.initialize()
-        logger.info("Application started successfully")
-    except Exception:
-        logger.exception("Failed to initialize RAG system")
-        raise
-
+    if not hasattr(app.state, "rag"):  # pragma: no cover
+        app.state.rag = RAGSystem.create(
+            settings=get_settings(), device=_detect_device(),
+        )
     yield
-
-    # Shutdown
     logger.info("Shutting down application...")
 
 
@@ -68,30 +58,19 @@ async def root():
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check(rag: RAGProtocol = Depends(get_rag_system)):
+async def health_check():
     """Health check endpoint."""
-    is_ready = rag.is_ready()
-    return HealthResponse(
-        status="healthy" if is_ready else "initializing",
-        model_loaded=rag.model is not None,
-        vector_store_ready=rag.vector_store is not None
-    )
+    return HealthResponse(status="healthy")
 
 
 @app.post("/chat", tags=["Chat"])
 async def chat(request: ChatRequest, rag: RAGProtocol = Depends(get_rag_system)):
     """Chat endpoint with RAG. Returns a Server-Sent Events stream."""
-    if not rag.is_ready():
-        raise HTTPException(
-            status_code=503,
-            detail="RAG system is not ready yet. Please try again later."
-        )
-
     history = request.conversation_history or []
 
     def event_generator():
         try:
-            yield from rag.chat_stream(request.message, history)
+            yield from rag.chat(request.message, history)
         except Exception as e:
             logger.error(f"Error during streaming: {e}", exc_info=True)
             yield 'data: {"type": "error", "content": "An internal error occurred."}\n\n'
