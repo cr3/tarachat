@@ -40,6 +40,7 @@ test = [
     "httpx>=0.26.0,<1.0.0",
     "more-itertools>=10.0.0,<11.0.0",
     "pytest>=7.4.0,<10.0.0",
+    "pytest-asyncio>=0.25.0,<1.0.0",
     "pytest-xdocker>=0.2.0,<1.0.0",
 ]
 check = [
@@ -106,7 +107,8 @@ lint.ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S106"]
+"tests/*" = ["S101", "S104", "S106"]
+"tarachat/testing/*" = ["S101"]
 
 # Pytest options:
 #   https://docs.pytest.org/en/6.2.x/reference.html#ini-options-ref
@@ -137,3 +139,4 @@ show_missing = true
 branch = true
 parallel = true
 source = ["tarachat"]
+omit = ["tarachat/testing/*"]

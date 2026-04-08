@@ -6,10 +6,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tarachat.main import app, get_rag_system
+from tarachat.protocols import RAGProtocol
 
 
 class FakeRAGSystem:
-    """Minimal RAG system that responds without ML models."""
+    """Minimal RAG system that responds without ML models.
+
+    Implements :class:`~tarachat.protocols.RAGProtocol`.
+    """
 
     def __init__(self):
         self.model = object()
@@ -22,11 +26,23 @@ class FakeRAGSystem:
     def is_ready(self) -> bool:
         return self._ready
 
-    def chat_stream(self, message: str, history: list | None = None):
+    def add_documents(self, texts, metadatas=None):
+        pass
+
+    def retrieve_documents(self, query, k=None):
+        return []
+
+    def create_empty_vector_store(self):
+        return object()
+
+    def chat_stream(self, message: str, conversation_history: list | None = None):
         answer = f"Echo: {message}"
         yield f'data: {json.dumps({"type": "token", "content": answer})}\n\n'
         yield f'data: {json.dumps({"type": "sources", "sources": ["doc1"]})}\n\n'
         yield "data: [DONE]\n\n"
+
+
+assert isinstance(FakeRAGSystem(), RAGProtocol), "FakeRAGSystem must satisfy RAGProtocol"
 
 
 @pytest.fixture(scope="module")

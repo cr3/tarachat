@@ -10,7 +10,8 @@ import sqlite3
 from pathlib import Path
 
 from tarachat.pdf_processor import PDFProcessor, pdf_processor
-from tarachat.rag import RAGSystem, rag_system
+from tarachat.protocols import RAGProtocol
+from tarachat.rag import rag_system
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +19,10 @@ logger = logging.getLogger(__name__)
 class DocumentManager:
     """Manages document ingestion and updates in the vector store using SQLite."""
 
-    def __init__(self, rag: RAGSystem, pdf: PDFProcessor):
+    def __init__(self, rag: RAGProtocol, pdf: PDFProcessor, db_path: Path):
         self.rag = rag
         self.pdf = pdf
-        self.db_path = Path(rag.settings.vector_store_path) / "documents.db"
+        self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self._migrate_from_json()
@@ -42,7 +43,7 @@ class DocumentManager:
 
     def _migrate_from_json(self):
         """Migrate existing documents_metadata.json to SQLite if present."""
-        json_path = Path(self.rag.settings.vector_store_path) / "documents_metadata.json"
+        json_path = self.db_path.parent / "documents_metadata.json"
         if not json_path.exists():
             return
 
@@ -154,7 +155,7 @@ class DocumentManager:
             self.rag.add_documents(texts, metadatas)
             logger.info(f"✓ Rebuilt vector store with {len(rows)} documents")
         else:
-            vector_store_path = Path(self.rag.settings.vector_store_path)
+            vector_store_path = self.db_path.parent
             self.rag.vector_store.save_local(str(vector_store_path))
             logger.info("✓ Vector store cleared (no documents remaining)")
 
@@ -192,7 +193,7 @@ class DocumentManager:
 
         self.rag.vector_store = self.rag.create_empty_vector_store()
 
-        vector_store_path = Path(self.rag.settings.vector_store_path)
+        vector_store_path = self.db_path.parent
         vector_store_path.mkdir(parents=True, exist_ok=True)
         self.rag.vector_store.save_local(str(vector_store_path))
 
@@ -332,7 +333,10 @@ def main():
     logger.info("Initializing RAG system...")
     rag_system.initialize()
 
-    manager = DocumentManager(rag_system, pdf_processor)
+    manager = DocumentManager(
+        rag_system, pdf_processor,
+        db_path=Path(rag_system.settings.vector_store_path) / "documents.db",
+    )
 
     commands = {
         'add': lambda: _run_add(manager, args),

@@ -13,21 +13,26 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 
-from tarachat.config import get_settings
+from tarachat.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _detect_device() -> str:
+    """Detect the best available compute device."""
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class RAGSystem:
     """RAG system using CroissantLLM and FAISS."""
 
-    def __init__(self):
-        self.settings = get_settings()
+    def __init__(self, settings: Settings | None = None, device: str | None = None):
+        self.settings = settings or get_settings()
         self.embeddings = None
         self.vector_store = None
         self.tokenizer = None
         self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device or _detect_device()
 
         logger.info(f"Using device: {self.device}")
 
@@ -129,6 +134,9 @@ class RAGSystem:
 
     def retrieve_documents(self, query: str, k: int | None = None) -> list[Document]:
         """Retrieve relevant documents for a query."""
+        if self.vector_store is None:
+            return []
+
         if k is None:
             k = self.settings.top_k
 
