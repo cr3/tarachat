@@ -1,5 +1,57 @@
 name: tarachat
 services:
+  backend:
+    build: backend
+    volumes:
+      - backend-cache:/root/.cache
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    networks:
+      default:
+        aliases:
+          - tarachat-backend
+    command: uvicorn --host=0.0.0.0 --port=80 tarachat.app:app --log-config=/app/log-config.yaml
+    restart: always
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost/health" ]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+
+  certbot:
+    image: certbot/certbot:v5.4.0
+    volumes:
+      - ./certbot/deploy-hook.sh:/deploy-hook.sh:ro
+      - certbot-certs:/etc/letsencrypt
+      - certbot-www:/var/www/html
+    environment:
+      HOSTNAME: ${HOSTNAME}
+    entrypoint: ""
+    command: >
+      sh -c "trap exit TERM; while :; do
+        certbot renew --webroot --webroot-path=/var/www/html --deploy-hook /deploy-hook.sh;
+        sleep 12h;
+      done"
+    restart: always
+    healthcheck:
+      test: [ "CMD", "test", "-e", "/etc/letsencrypt/live/fullchain.pem" ]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  frontend:
+    build: frontend
+    networks:
+      default:
+        aliases:
+          - tarachat-frontend
+    restart: always
+
   nginx:
     build: nginx
     depends_on:
@@ -21,55 +73,15 @@ services:
           - tarachat-nginx
     restart: always
 
-  certbot:
-    image: certbot/certbot:v5.4.0
-    volumes:
-      - ./certbot/deploy-hook.sh:/deploy-hook.sh:ro
-      - certbot-certs:/etc/letsencrypt
-      - certbot-www:/var/www/html
-    environment:
-      - HOSTNAME=${HOSTNAME}
-    entrypoint: ""
-    command: >
-      sh -c "trap exit TERM; while :; do
-        certbot renew --webroot --webroot-path=/var/www/html --deploy-hook /deploy-hook.sh;
-        sleep 12h;
-      done"
-    restart: always
-    healthcheck:
-      test: [ "CMD", "test", "-e", "/etc/letsencrypt/live/fullchain.pem" ]
-      start_period: 10s
-      interval: 10s
-      timeout: 5s
-      retries: 15
-
-  backend:
-    build: backend
-    volumes:
-      - backend-cache:/root/.cache
-    networks:
-      default:
-        aliases:
-          - tarachat-backend
-    command: uvicorn --host=0.0.0.0 --port=80 tarachat.app:app --log-config=/app/log-config.yaml
-    restart: always
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost/health" ]
-      start_period: 30s
-      interval: 10s
-      timeout: 5s
-
-  frontend:
-    build: frontend
-    networks:
-      default:
-        aliases:
-          - tarachat-frontend
-    restart: always
-
 networks:
   default:
     driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-tarachat
+    ipam:
+      driver: default
+      config:
+        - subnet: ${IPV4_NETWORK:-172.22.1}.0/24
 
 volumes:
   backend-cache:
