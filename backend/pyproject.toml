@@ -10,7 +10,7 @@ repository = "https://github.com/cr3/tarachat"
 packages = [
     {include = "tarachat"},
 ]
-requires-python = ">=3.12,<4.0"
+requires-python = ">=3.10,<4.0"
 dependencies = [
     "aiofiles>=25.1.0,<25.2.0",
     "aiohttp>=3.13.2,<4.0.0",
@@ -61,7 +61,7 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"
 line-length = 120
 fix = true
 lint.select = [
