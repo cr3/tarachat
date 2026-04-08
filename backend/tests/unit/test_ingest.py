@@ -1,15 +1,9 @@
 import json
 import sqlite3
-from pathlib import Path
 
 import pytest
 
 from tarachat.ingest import DocumentManager
-
-
-class FakeSettings:
-    def __init__(self, tmp_path):
-        self.vector_store_path = str(tmp_path / "vector_store")
 
 
 class FakeVectorStore:
@@ -21,8 +15,8 @@ class FakeVectorStore:
 
 
 class FakeRAG:
-    def __init__(self, tmp_path):
-        self.settings = FakeSettings(tmp_path)
+    def __init__(self):
+        self.model = object()
         self.vector_store = FakeVectorStore()
         self.added: list[tuple[list, list]] = []
 
@@ -39,8 +33,8 @@ class FakePDF:
 
 
 @pytest.fixture()
-def rag(tmp_path):
-    return FakeRAG(tmp_path)
+def rag():
+    return FakeRAG()
 
 
 @pytest.fixture()
@@ -49,8 +43,8 @@ def pdf():
 
 
 @pytest.fixture()
-def manager(rag, pdf):
-    return DocumentManager(rag, pdf)
+def manager(rag, pdf, tmp_path):
+    return DocumentManager(rag, pdf, db_path=tmp_path / "documents.db")
 
 
 class TestAddDocument:
@@ -169,14 +163,14 @@ class TestClearAll:
 
 class TestMigrateFromJson:
     def test_migrates_json_to_sqlite(self, rag, pdf, tmp_path):
-        vs_path = Path(rag.settings.vector_store_path)
-        vs_path.mkdir(parents=True)
-        json_path = vs_path / "documents_metadata.json"
+        db_path = tmp_path / "vs" / "documents.db"
+        json_path = tmp_path / "vs" / "documents_metadata.json"
+        json_path.parent.mkdir(parents=True)
         json_path.write_text(json.dumps({
             "doc1": {"metadata": {"source": "test"}, "content_length": 42}
         }))
 
-        manager = DocumentManager(rag, pdf)
+        manager = DocumentManager(rag, pdf, db_path=db_path)
         assert manager._doc_exists("doc1")
         assert not json_path.exists()
         assert json_path.with_suffix(".json.bak").exists()

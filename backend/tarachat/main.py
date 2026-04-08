@@ -7,12 +7,13 @@ from fastapi.responses import StreamingResponse
 
 from tarachat.config import get_settings
 from tarachat.models import ChatRequest, HealthResponse
-from tarachat.rag import RAGSystem, rag_system
+from tarachat.protocols import RAGProtocol
+from tarachat.rag import rag_system
 
 logger = logging.getLogger(__name__)
 
 
-def get_rag_system() -> RAGSystem:
+def get_rag_system() -> RAGProtocol:
     """Dependency that provides the RAG system instance."""
     return rag_system
 
@@ -67,7 +68,7 @@ async def root():
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check(rag: RAGSystem = Depends(get_rag_system)):
+async def health_check(rag: RAGProtocol = Depends(get_rag_system)):
     """Health check endpoint."""
     is_ready = rag.is_ready()
     return HealthResponse(
@@ -78,7 +79,7 @@ async def health_check(rag: RAGSystem = Depends(get_rag_system)):
 
 
 @app.post("/chat", tags=["Chat"])
-async def chat(request: ChatRequest, rag: RAGSystem = Depends(get_rag_system)):
+async def chat(request: ChatRequest, rag: RAGProtocol = Depends(get_rag_system)):
     """Chat endpoint with RAG. Returns a Server-Sent Events stream."""
     if not rag.is_ready():
         raise HTTPException(

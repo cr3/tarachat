@@ -40,12 +40,13 @@ def save_metadata(file_path: Path, metadata: dict) -> None:
 
 def has_changed(local_meta: dict, remote_meta: dict) -> bool:
     """Return True if we should re-download the file."""
-    return any([
-        not remote_meta,
-        remote_meta["etag"] != local_meta.get("etag"),
-        remote_meta["last_modified"] != local_meta["last_modified"],
-        remote_meta["content_length"] != local_meta["content_length"],
-    ])
+    if not remote_meta:
+        return True
+    return (
+        remote_meta["etag"] != local_meta.get("etag")
+        or remote_meta["last_modified"] != local_meta.get("last_modified")
+        or remote_meta["content_length"] != local_meta.get("content_length")
+    )
 
 
 async def fetch_remote_metadata(session: aiohttp.ClientSession, url: URL) -> dict:
@@ -64,6 +65,18 @@ async def fetch_remote_metadata(session: aiohttp.ClientSession, url: URL) -> dic
             }
     except Exception:
         return {}
+
+
+async def _write_response(
+    resp: aiohttp.ClientResponse,
+    file_path: Path,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> None:
+    """Stream a response body to disk."""
+    async with aiofiles.open(file_path, "wb") as f:
+        async for chunk in resp.content.iter_chunked(chunk_size):
+            if chunk:
+                await f.write(chunk)
 
 
 async def download_one(
@@ -89,11 +102,7 @@ async def download_one(
     try:
         async with session.get(url, timeout=timeout) as resp:
             resp.raise_for_status()
-
-            async with aiofiles.open(file_path, "wb") as f:
-                async for chunk in resp.content.iter_chunked(chunk_size):
-                    if chunk:
-                        await f.write(chunk)
+            await _write_response(resp, file_path, chunk_size)
 
         if remote_meta:
             save_metadata(file_path, remote_meta)
