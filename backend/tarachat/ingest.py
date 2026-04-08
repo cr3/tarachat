@@ -9,9 +9,9 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from tarachat.config import get_settings
 from tarachat.pdf_processor import PDFProcessor, pdf_processor
-from tarachat.protocols import RAGProtocol
-from tarachat.rag import rag_system
+from tarachat.rag import RAGProtocol, RAGSystem, _detect_device
 
 logger = logging.getLogger(__name__)
 
@@ -330,12 +330,13 @@ def main():
 
     logging.basicConfig(level=logging.INFO)
 
+    settings = get_settings()
     logger.info("Initializing RAG system...")
-    rag_system.initialize()
+    rag = RAGSystem.create(settings=settings, device=_detect_device())
 
     manager = DocumentManager(
-        rag_system, pdf_processor,
-        db_path=Path(rag_system.settings.vector_store_path) / "documents.db",
+        rag, pdf_processor,
+        db_path=Path(settings.vector_store_path) / "documents.db",
     )
 
     commands = {

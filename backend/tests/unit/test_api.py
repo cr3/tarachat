@@ -17,23 +17,6 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
-        assert data["model_loaded"] is True
-        assert data["vector_store_ready"] is True
-
-    def test_initializing_status(self, client, fake_rag):
-        fake_rag._ready = False
-        fake_rag.model = None
-        fake_rag.vector_store = None
-        try:
-            response = client.get("/health")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["status"] == "initializing"
-            assert data["model_loaded"] is False
-        finally:
-            fake_rag._ready = True
-            fake_rag.model = object()
-            fake_rag.vector_store = object()
 
 
 def _parse_sse_events(response_text: str) -> list:
@@ -77,11 +60,3 @@ class TestChatEndpoint:
     def test_chat_missing_message_returns_422(self, client):
         response = client.post("/chat", json={})
         assert response.status_code == 422
-
-    def test_chat_when_not_ready_returns_503(self, client, fake_rag):
-        fake_rag._ready = False
-        try:
-            response = client.post("/chat", json={"message": "Hello"})
-            assert response.status_code == 503
-        finally:
-            fake_rag._ready = True

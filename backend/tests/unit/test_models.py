@@ -4,8 +4,6 @@ from pydantic import ValidationError
 from tarachat.models import (
     ChatMessage,
     ChatRequest,
-    ChatResponse,
-    DocumentUpload,
     HealthResponse,
 )
 
@@ -49,34 +47,7 @@ class TestChatRequest:
             ChatRequest()
 
 
-class TestChatResponse:
-    def test_valid_response(self):
-        resp = ChatResponse(response="Hello!", sources=["doc1"])
-        assert resp.response == "Hello!"
-        assert resp.sources == ["doc1"]
-
-    def test_default_sources(self):
-        resp = ChatResponse(response="Hello!")
-        assert resp.sources == []
-
-
-class TestDocumentUpload:
-    def test_valid_upload(self):
-        doc = DocumentUpload(content="Some text")
-        assert doc.content == "Some text"
-        assert doc.metadata == {}
-
-    def test_with_metadata(self):
-        doc = DocumentUpload(content="Text", metadata={"author": "John"})
-        assert doc.metadata["author"] == "John"
-
-
 class TestHealthResponse:
     def test_healthy(self):
-        resp = HealthResponse(status="healthy", model_loaded=True, vector_store_ready=True)
+        resp = HealthResponse(status="healthy")
         assert resp.status == "healthy"
-        assert resp.model_loaded is True
-
-    def test_initializing(self):
-        resp = HealthResponse(status="initializing", model_loaded=False, vector_store_ready=False)
-        assert resp.status == "initializing"

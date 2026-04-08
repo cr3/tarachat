@@ -7,6 +7,7 @@ import pytest
 from yarl import URL
 
 from tarachat.testing.compose import ComposeServer
+from tarachat.testing.http import HTTPSession
 
 
 @pytest.fixture(scope="session")
@@ -63,7 +64,5 @@ def backend_service(compose_server):
 @pytest.fixture(scope="session")
 def api_session(backend_service):
     """HTTP session connected to the backend API."""
-    from tarachat.testing.http import HTTPSession
-
     url = URL.build(scheme="http", host=backend_service.ip, port=8000)
     return HTTPSession(url)

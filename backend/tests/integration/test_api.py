@@ -31,20 +31,6 @@ def test_health(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "healthy"
-    assert body["model_loaded"] is True
-    assert body["vector_store_ready"] is True
-
-
-def test_health_initializing(client, fake_rag):
-    """The API should report initializing when the RAG system is not ready."""
-    fake_rag._ready = False
-    try:
-        response = client.get("/health")
-
-        assert response.status_code == 200
-        assert response.json()["status"] == "initializing"
-    finally:
-        fake_rag._ready = True
 
 
 def test_chat(client):
@@ -77,17 +63,6 @@ def test_chat_with_history(client):
     events = _parse_sse(response.text)
     tokens = [e for e in events if e["type"] == "token"]
     assert tokens[0]["content"] == "Echo: Follow up"
-
-
-def test_chat_not_ready(client, fake_rag):
-    """The API should return 503 when the RAG system is not ready."""
-    fake_rag._ready = False
-    try:
-        response = client.post("/chat", json={"message": "Hello"})
-
-        assert response.status_code == 503
-    finally:
-        fake_rag._ready = True
 
 
 def test_chat_empty_message(client):
