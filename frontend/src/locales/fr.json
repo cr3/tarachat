@@ -1,0 +1,25 @@
+{
+  "app": {
+    "title": "TaraChat - Chatbot RAG"
+  },
+  "header": {
+    "title": "Taram Chat",
+    "subtitle": "Chatbot RAG propulsé par CroissantLLM"
+  },
+  "status": {
+    "connecting": "Connexion au serveur...",
+    "ready": "Prêt",
+    "initializing": "Initialisation du modèle..."
+  },
+  "chat": {
+    "welcome": "Bienvenue sur TaraChat !",
+    "startConversation": "Commencez une conversation en tapant un message ci-dessous.",
+    "placeholder": "Tapez votre message... (Maj+Entrée pour un saut de ligne)",
+    "send": "Envoyer",
+    "sources": "Sources ({{count}})",
+    "error": "Désolé, une erreur s'est produite. Veuillez vous assurer que le serveur est en marche et réessayer."
+  },
+  "language": {
+    "toggle": "Changer de langue"
+  }
+}

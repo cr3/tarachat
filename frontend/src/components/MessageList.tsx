@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Message } from '../types';
 import MessageBubble from './MessageBubble';
 import './MessageList.css';
@@ -8,12 +9,14 @@ interface MessageListProps {
 }
 
 function MessageList({ messages, isLoading }: MessageListProps) {
+  const { t } = useTranslation();
+
   if (messages.length === 0) {
     return (
       <div className="message-list-empty">
         <div className="empty-state">
-          <h2>Welcome to TaraChat!</h2>
-          <p>Start a conversation by typing a message below.</p>
+          <h2>{t('chat.welcome')}</h2>
+          <p>{t('chat.startConversation')}</p>
         </div>
       </div>
     );

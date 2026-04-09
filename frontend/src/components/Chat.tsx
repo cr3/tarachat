@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Message } from '../types';
 import { sendMessageStream } from '../api';
 import MessageList from './MessageList';
@@ -6,6 +7,7 @@ import MessageInput from './MessageInput';
 import './Chat.css';
 
 function Chat() {
+  const { t } = useTranslation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -74,7 +76,7 @@ function Chat() {
               if (last.role === 'assistant' && last.content === '') {
                 updated[updated.length - 1] = {
                   ...last,
-                  content: 'Sorry, I encountered an error. Please make sure the backend is running and try again.',
+                  content: t('chat.error'),
                 };
               }
               return updated;
@@ -93,7 +95,7 @@ function Chat() {
         if (last.role === 'assistant') {
           updated[updated.length - 1] = {
             ...last,
-            content: 'Sorry, I encountered an error. Please make sure the backend is running and try again.',
+            content: t('chat.error'),
           };
         }
         return updated;

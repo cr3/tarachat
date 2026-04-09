@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Message } from '../types';
 import './MessageBubble.css';
 
@@ -6,6 +7,7 @@ interface MessageBubbleProps {
 }
 
 function MessageBubble({ message }: MessageBubbleProps) {
+  const { t, i18n } = useTranslation();
   const isUser = message.role === 'user';
 
   return (
@@ -15,7 +17,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         {message.sources && message.sources.length > 0 && (
           <div className="message-sources">
             <details>
-              <summary>Sources ({message.sources.length})</summary>
+              <summary>{t('chat.sources', { count: message.sources.length })}</summary>
               <div className="sources-list">
                 {message.sources.map((source, index) => (
                   <div key={index} className="source-item">
@@ -28,7 +30,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         )}
       </div>
       <div className="message-timestamp">
-        {message.timestamp.toLocaleTimeString([], {
+        {message.timestamp.toLocaleTimeString(i18n.language, {
           hour: '2-digit',
           minute: '2-digit',
         })}

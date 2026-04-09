@@ -1,4 +1,5 @@
 import { useState, KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import './MessageInput.css';
 
 interface MessageInputProps {
@@ -7,6 +8,7 @@ interface MessageInputProps {
 }
 
 function MessageInput({ onSendMessage, disabled = false }: MessageInputProps) {
+  const { t } = useTranslation();
   const [input, setInput] = useState('');
 
   const handleSend = () => {
@@ -30,7 +32,7 @@ function MessageInput({ onSendMessage, disabled = false }: MessageInputProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Type your message... (Shift+Enter for new line)"
+          placeholder={t('chat.placeholder')}
           disabled={disabled}
           rows={1}
         />
@@ -39,7 +41,7 @@ function MessageInput({ onSendMessage, disabled = false }: MessageInputProps) {
           disabled={disabled || !input.trim()}
           className="send-button"
         >
-          Send
+          {t('chat.send')}
         </button>
       </div>
     </div>
