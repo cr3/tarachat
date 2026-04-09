@@ -8,7 +8,7 @@ class TestSettings:
         s = Settings()
         assert s.host == "0.0.0.0"
         assert s.port == 8000
-        assert s.demo_mode is True
+        assert s.demo_mode is False
         assert s.chunk_size == 512
         assert s.chunk_overlap == 50
         assert s.top_k == 3

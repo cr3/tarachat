@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     top_k: int = 3
 
     # Performance Configuration
-    demo_mode: bool = True  # Set to True for fast responses without LLM (testing/development)
+    demo_mode: bool = False  # Set to True for fast responses without LLM (testing/development)
     max_tokens: int = 128  # Reduced from 512 for faster generation
 
     # Paths
