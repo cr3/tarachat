@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
 import aiofiles
@@ -15,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 60
 DEFAULT_CHUNK_SIZE = 1024 * 1024
+
+# Characters forbidden in filenames on Windows and/or Linux.
+_FILENAME_BAD_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def meta_path_for(file_path: Path) -> Path:
@@ -49,108 +53,161 @@ def has_changed(local_meta: dict, remote_meta: dict) -> bool:
     )
 
 
-async def fetch_remote_metadata(session: aiohttp.ClientSession, url: URL) -> dict:
-    """Get metadata via HEAD. If it fails, return {}."""
-    try:
-        async with session.head(url, allow_redirects=True, timeout=20) as resp:
-            # Some servers may not like HEAD; treat non-2xx as no metadata
-            if resp.status >= 400:
-                return {}
-            headers = resp.headers
-            return {
-                "etag": headers.get("ETag"),
-                "last_modified": headers.get("Last-Modified"),
-                "content_length": headers.get("Content-Length"),
-                "url": str(url),
-            }
-    except Exception:
-        return {}
+def sanitize_filename(text: str, extension: str = "") -> str:
+    """Turn *text* into a safe filename, preserving non-ASCII characters.
+
+    >>> sanitize_filename("Règlement numéro 06.06.2025", ".pdf")
+    'Règlement numéro 06.06.2025.pdf'
+    >>> sanitize_filename('a/b:c*d', '.txt')
+    'a_b_c_d.txt'
+    """
+    name = _FILENAME_BAD_RE.sub("_", text).strip().strip(".")
+    if not name:
+        name = "_"
+    # Ensure the proper extension is present.
+    if extension and not name.lower().endswith(extension.lower()):
+        name += extension
+    return name
 
 
-async def _write_response(
-    resp: aiohttp.ClientResponse,
-    file_path: Path,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-) -> None:
-    """Stream a response body to disk."""
-    async with aiofiles.open(file_path, "wb") as f:
-        async for chunk in resp.content.iter_chunked(chunk_size):
-            if chunk:
-                await f.write(chunk)
+class Downloader:
+    """Downloads files, skipping unchanged ones based on HTTP metadata.
 
+    Subclass and override :meth:`fetch_metadata` and :meth:`fetch_content`
+    for testing without real network or disk I/O.
+    """
 
-async def download_one(
-    session: aiohttp.ClientSession,
-    url: URL,
-    target_dir: Path,
-    timeout: int = DEFAULT_TIMEOUT,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-) -> tuple[str, str | None, str]:
-    """Download a single URL if it has changed."""
-    filename = url.name
-    file_path = target_dir / filename
+    async def fetch_metadata(self, session: aiohttp.ClientSession, url: URL) -> dict:
+        """Get metadata via HEAD. If it fails, return ``{}``."""
+        try:
+            async with session.head(url, allow_redirects=True, timeout=20) as resp:
+                if resp.status >= 400:
+                    return {}
+                headers = resp.headers
+                return {
+                    "etag": headers.get("ETag"),
+                    "last_modified": headers.get("Last-Modified"),
+                    "content_length": headers.get("Content-Length"),
+                    "url": str(url),
+                }
+        except Exception:
+            return {}
 
-    logger.info(f"[{url}] Checking remote metadata...")
-    remote_meta = await fetch_remote_metadata(session, url)
-    local_meta = load_metadata(file_path)
-
-    if file_path.exists() and not has_changed(local_meta, remote_meta):
-        logger.info(f"[{url}] Unchanged, skipping.")
-        return (url, str(file_path), "skipped")
-
-    logger.info(f"[{url}] Downloading to {file_path}...")
-    try:
+    async def fetch_content(
+        self,
+        session: aiohttp.ClientSession,
+        url: URL,
+        file_path: Path,
+        *,
+        timeout: int = DEFAULT_TIMEOUT,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> None:
+        """Download *url* and stream the response body to *file_path*."""
         async with session.get(url, timeout=timeout) as resp:
             resp.raise_for_status()
-            await _write_response(resp, file_path, chunk_size)
+            async with aiofiles.open(file_path, "wb") as f:
+                async for chunk in resp.content.iter_chunked(chunk_size):
+                    if chunk:
+                        await f.write(chunk)
 
-        if remote_meta:
-            save_metadata(file_path, remote_meta)
+    async def download_one(
+        self,
+        session: aiohttp.ClientSession,
+        url: URL,
+        target_dir: Path,
+        filename: str | None = None,
+        *,
+        timeout: int = DEFAULT_TIMEOUT,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> tuple[str, str | None, str]:
+        """Download a single URL if it has changed.
 
-        return (url, str(file_path), "downloaded")
+        *filename* overrides the default (``url.name``) for the local file.
+        """
+        filename = filename or url.name
+        file_path = target_dir / filename
 
-    except Exception:
-        logger.exception(f"[{url}] Download failed")
-        return (url, None, "error")
+        logger.info(f"[{url}] Checking remote metadata...")
+        remote_meta = await self.fetch_metadata(session, url)
+        local_meta = load_metadata(file_path)
+
+        if file_path.exists() and not has_changed(local_meta, remote_meta):
+            logger.info(f"[{url}] Unchanged, skipping.")
+            return (url, str(file_path), "skipped")
+
+        logger.info(f"[{url}] Downloading to {file_path}...")
+        try:
+            await self.fetch_content(
+                session, url, file_path, timeout=timeout, chunk_size=chunk_size,
+            )
+            if remote_meta:
+                save_metadata(file_path, remote_meta)
+            return (url, str(file_path), "downloaded")
+        except Exception:
+            logger.exception(f"[{url}] Download failed")
+            return (url, None, "error")
+
+    async def download_many(
+        self,
+        urls: list[tuple[URL, str]],
+        target_dir: Path,
+        *,
+        max_concurrency: int = 5,
+        timeout: int = DEFAULT_TIMEOUT,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> list[tuple[str, str | None, str]]:
+        """Download multiple URLs concurrently if the remote file changed."""
+        target_dir = Path(target_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async with aiohttp.ClientSession() as session:
+
+            async def worker(u: URL, fname: str):
+                async with semaphore:
+                    return await self.download_one(
+                        session, u, target_dir, fname, timeout=timeout, chunk_size=chunk_size,
+                    )
+
+            tasks = [asyncio.create_task(worker(u, fn)) for u, fn in urls]
+            return await asyncio.gather(*tasks)
 
 
-async def download_many(
-    urls: list[URL],
-    target_dir: Path,
-    max_concurrency: int = 5,
-    timeout: int = DEFAULT_TIMEOUT,
-    chunk_size: int = DEFAULT_CHUNK_SIZE,
-) -> list[tuple[str, str | None, str]]:
-    """Download multiple URLs concurrently if the remote file changed."""
-    target_dir = Path(target_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
+async def get_urls(url: URL, timeout: int = DEFAULT_TIMEOUT) -> list[tuple[URL, str]]:
+    """Fetch document listing and return ``(download_url, filename)`` pairs.
 
-    semaphore = asyncio.Semaphore(max_concurrency)
-
-    async with aiohttp.ClientSession() as session:
-
-        async def worker(u: URL):
-            async with semaphore:
-                return await download_one(session, u, target_dir, timeout, chunk_size)
-
-        tasks = [asyncio.create_task(worker(u)) for u in urls]
-        return await asyncio.gather(*tasks)
-
-
-async def get_urls(url: URL, timeout: int = DEFAULT_TIMEOUT) -> list[URL]:
+    The *filename* is derived from the link text (which preserves
+    non-ASCII characters such as accents) rather than the URL path,
+    since the remote storage may strip those characters from URLs.
+    """
     async with aiohttp.ClientSession() as session, session.get(url, timeout=timeout) as resp:
         resp.raise_for_status()
         data = await resp.json()
         html_content = data['contenu']
         soup = BeautifulSoup(html_content, "html.parser")
-        return [URL(a.get("href")) for a in soup.find_all("a")]
+        results: list[tuple[URL, str]] = []
+        for a in soup.find_all("a"):
+            href = a.get("href")
+            if not href:
+                continue
+            link_url = URL(href)
+            # Derive a proper filename from the link text, falling back to
+            # the URL name when no text is available.
+            link_text = a.get_text(strip=True)
+            ext = Path(link_url.name).suffix or ".pdf"
+            filename = (
+                sanitize_filename(link_text, ext) if link_text else link_url.name
+            )
+            results.append((link_url, filename))
+        return results
 
 
 async def _async_main():
     url = URL("https://vplus.modellium.com/api/www.notre-dame-du-laus.ca/structure/detail/reglements?localisation=fr")
-    urls = await get_urls(url)
+    url_filename_pairs = await get_urls(url)
     target_dir = Path("data/documents")
-    await download_many(urls, target_dir)
+    await Downloader().download_many(url_filename_pairs, target_dir)
 
 
 def main():
