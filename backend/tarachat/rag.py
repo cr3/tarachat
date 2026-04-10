@@ -11,9 +11,9 @@ import faiss
 import torch
 from attrs import define
 from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from transformers import (
     AutoModelForCausalLM,
