@@ -32,6 +32,7 @@ _STOP_PHRASES = [
     "Sources :",
     "Références :",
     "Notes et références",
+    "---",
 ]
 
 
@@ -253,9 +254,8 @@ class RAGSystem:
 
         return f"""{system}
 
---- CONTEXTE ---
+Contexte :
 {context}
---- FIN DU CONTEXTE ---
 {history_text}
 Question : {query}
 
