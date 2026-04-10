@@ -31,7 +31,7 @@ class TestBuildPrompt:
         result = rag._build_prompt("What is X?", docs)
         assert "Some context" in result
         assert "Question : What is X?" in result
-        assert "Réponse :" in result
+        assert "Réponse courte et précise :" in result
 
     def test_prompt_without_history(self, rag):
         docs = [Document(page_content="ctx")]
@@ -45,7 +45,7 @@ class TestBuildPrompt:
             ChatMessage(role="assistant", content="Hello"),
         ]
         result = rag._build_prompt("Q?", docs, history)
-        assert "Historique de la conversation" in result
+        assert "Historique :" in result
         assert "Utilisateur: Hi" in result
         assert "Assistant: Hello" in result
 

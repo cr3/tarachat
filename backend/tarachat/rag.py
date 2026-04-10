@@ -236,9 +236,10 @@ class RAGSystem:
             context_parts.append(f"[{ref}]: {text}")
         context = "\n\n".join(context_parts)
 
-        citation_instruction = (
+        system = (
+            "Tu es un assistant municipal. Réponds uniquement à partir du contexte fourni. "
             "Cite tes sources entre crochets, par exemple [fichier.pdf#page=3]. "
-            "Ne combine pas les sources : [a.pdf#page=1][b.pdf#page=2]."
+            "Donne une réponse claire et concise."
         )
 
         history_text = ""
@@ -248,31 +249,17 @@ class RAGSystem:
             for msg in recent:
                 role = "Utilisateur" if msg.role == "user" else "Assistant"
                 history_lines.append(f"{role}: {msg.content}")
-            history_text = "\n".join(history_lines)
+            history_text = "\nHistorique :\n" + "\n".join(history_lines) + "\n"
 
-        if history_text:
-            return f"""{citation_instruction}
+        return f"""{system}
 
-Voici du contexte pertinent :
-
+--- CONTEXTE ---
 {context}
-
-Historique de la conversation :
+--- FIN DU CONTEXTE ---
 {history_text}
-
 Question : {query}
 
-Réponse :"""
-        else:
-            return f"""{citation_instruction}
-
-Voici du contexte pertinent :
-
-{context}
-
-Question : {query}
-
-Réponse :"""
+Réponse courte et précise :"""
 
     def _build_demo_response(self, docs: list[Document]) -> str:
         """Build a demo-mode response from retrieved documents (no LLM)."""
