@@ -229,19 +229,17 @@ class RAGSystem:
         context_docs: list[Document],
         conversation_history: list[dict] | None = None,
     ) -> str:
-        """Build the LLM prompt from context, history, and query."""
+        """Build the LLM prompt from context, history, and query.
+
+        Uses a few-shot example so the completion model learns the expected
+        answer format instead of continuing the raw context text.
+        """
         context_parts = []
         for doc in context_docs:
             ref = _source_ref(doc)
             text = re.sub(r"\[Page \d+\]\n?", "", doc.page_content).strip()
             context_parts.append(f"[{ref}]: {text}")
         context = "\n\n".join(context_parts)
-
-        system = (
-            "Tu es un assistant municipal. Réponds uniquement à partir du contexte fourni. "
-            "Cite tes sources entre crochets, par exemple [fichier.pdf#page=3]. "
-            "Donne une réponse claire et concise."
-        )
 
         history_text = ""
         if conversation_history:
@@ -252,14 +250,18 @@ class RAGSystem:
                 history_lines.append(f"{role}: {msg.content}")
             history_text = "\nHistorique :\n" + "\n".join(history_lines) + "\n"
 
-        return f"""{system}
+        # Few-shot example teaches the model the task format
+        return f"""Tu es un assistant qui répond aux questions sur les règlements municipaux. Réponds uniquement à partir du contexte. Cite tes sources.
 
+Question : Quelle est la largeur minimale d'un terrain?
+Contexte : [zonage.pdf#page=12]: La largeur minimale d'un terrain en zone résidentielle est de 30 mètres.
+Réponse : La largeur minimale d'un terrain en zone résidentielle est de 30 mètres [zonage.pdf#page=12].
+
+Question : {query}
 Contexte :
 {context}
 {history_text}
-Question : {query}
-
-Réponse courte et précise :"""
+Réponse :"""
 
     def _build_demo_response(self, docs: list[Document]) -> str:
         """Build a demo-mode response from retrieved documents (no LLM)."""
@@ -308,10 +310,11 @@ Réponse courte et précise :"""
         return {
             **inputs,
             "max_new_tokens": max_length,
-            "temperature": 0.7,
-            "top_p": 0.9,
+            "temperature": 0.3,
+            "top_p": 0.85,
             "do_sample": True,
             "num_beams": 1,
+            "repetition_penalty": 1.2,
             "pad_token_id": self.tokenizer.eos_token_id,
             "stopping_criteria": StoppingCriteriaList([
                 _StopOnPhrase(self.tokenizer, _STOP_PHRASES),

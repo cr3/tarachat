@@ -31,7 +31,9 @@ class TestBuildPrompt:
         result = rag._build_prompt("What is X?", docs)
         assert "Some context" in result
         assert "Question : What is X?" in result
-        assert "Réponse courte et précise :" in result
+        assert "Réponse :" in result
+        # Few-shot example present
+        assert "largeur minimale" in result
 
     def test_prompt_without_history(self, rag):
         docs = [Document(page_content="ctx")]
