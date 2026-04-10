@@ -6,9 +6,9 @@ from fastapi import Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
+from tarachat import pdf
 from tarachat.config import get_settings
 from tarachat.models import ChatRequest, HealthResponse
-from tarachat.pdf_serve import serve_pdf
 from tarachat.rag import RAGProtocol, RAGSystem, _detect_device
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ async def get_document(
     if not pdf_path.is_file():
         return Response(status_code=404, content="Document not found")
 
-    content = serve_pdf(pdf_path, page=page, highlights=highlights)
+    content = pdf.serve(pdf_path, page=page, highlights=highlights)
     return Response(
         content=content,
         media_type="application/pdf",
