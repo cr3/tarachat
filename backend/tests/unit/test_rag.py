@@ -8,7 +8,7 @@ from langchain_core.documents import Document
 
 from tarachat.config import Settings
 from tarachat.models import ChatMessage
-from tarachat.rag import RAGSystem
+from tarachat.rag import RAGSystem, _split_by_pages
 
 
 @pytest.fixture
@@ -23,6 +23,28 @@ def rag(tmp_path):
         tokenizer=MagicMock(),
         model=MagicMock(),
     )
+
+
+class TestSplitByPages:
+    def test_single_page(self):
+        text = "[Page 1]\nHello world"
+        assert _split_by_pages(text) == [(1, "Hello world")]
+
+    def test_multiple_pages(self):
+        text = "[Page 1]\nFirst\n\n[Page 2]\nSecond"
+        result = _split_by_pages(text)
+        assert result == [(1, "First"), (2, "Second")]
+
+    def test_no_markers(self):
+        text = "Plain text without markers"
+        assert _split_by_pages(text) == [(1, "Plain text without markers")]
+
+    def test_empty_pages_skipped(self):
+        text = "[Page 1]\nContent\n\n[Page 2]\n\n[Page 3]\nMore"
+        result = _split_by_pages(text)
+        assert len(result) == 2
+        assert result[0] == (1, "Content")
+        assert result[1] == (3, "More")
 
 
 class TestBuildPrompt:
@@ -182,6 +204,19 @@ class TestAddDocuments:
         rag.add_documents([long_text])
         docs = rag.vector_store.add_documents.call_args[0][0]
         assert len(docs) > 1  # Should be chunked
+
+    def test_all_chunks_have_page_marker(self, rag, tmp_path):
+        """Every chunk should have a [Page N] marker, even after splitting."""
+        rag.settings.vector_store_path = str(tmp_path / "vs")
+        rag.settings.chunk_size = 50
+        rag.settings.chunk_overlap = 0
+        text = "[Page 5]\n" + "word " * 100
+        rag.add_documents([text], [{"filename": "test.pdf"}])
+        docs = rag.vector_store.add_documents.call_args[0][0]
+        assert len(docs) > 1
+        for doc in docs:
+            assert "[Page 5]" in doc.page_content
+            assert doc.metadata["page"] == 5
 
 
 class TestChat:

@@ -119,9 +119,30 @@ def _load_vector_store(
 def _source_ref(doc: Document) -> str:
     """Build a citation reference like ``file.pdf#page=5`` from a Document."""
     filename = doc.metadata.get("filename", "")
-    m = re.search(r"\[Page (\d+)\]", doc.page_content)
-    page = int(m.group(1)) if m else 1
+    page = doc.metadata.get("page")
+    if page is None:
+        m = re.search(r"\[Page (\d+)\]", doc.page_content)
+        page = int(m.group(1)) if m else 1
     return f"{filename}#page={page}"
+
+
+def _split_by_pages(text: str) -> list[tuple[int, str]]:
+    """Split extracted text into ``(page_number, page_text)`` pairs.
+
+    Expects text produced by :func:`pdf.extract_text` with ``[Page N]``
+    markers.  Text before the first marker (if any) is assigned to page 1.
+    """
+    parts = re.split(r"\[Page (\d+)\]\n?", text)
+    # parts = ['preamble', '1', 'text…', '2', 'text…', …]
+    sections: list[tuple[int, str]] = []
+    if parts[0].strip():
+        sections.append((1, parts[0].strip()))
+    for i in range(1, len(parts), 2):
+        page_num = int(parts[i])
+        page_text = parts[i + 1].strip() if i + 1 < len(parts) else ""
+        if page_text:
+            sections.append((page_num, page_text))
+    return sections
 
 
 @define
@@ -183,7 +204,6 @@ class RAGSystem:
 
         logger.info(f"Adding {len(texts)} documents to vector store...")
 
-        # Split texts into chunks
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
@@ -192,15 +212,17 @@ class RAGSystem:
 
         documents = []
         for i, text in enumerate(texts):
-            chunks = text_splitter.split_text(text)
-            metadata = metadatas[i] if metadatas and i < len(metadatas) else {}
+            base_metadata = metadatas[i] if metadatas and i < len(metadatas) else {}
 
-            for j, chunk in enumerate(chunks):
-                doc = Document(
-                    page_content=chunk,
-                    metadata={**metadata, "chunk": j}
-                )
-                documents.append(doc)
+            # Split by page first so every chunk keeps its page number
+            for page_num, page_text in _split_by_pages(text):
+                chunks = text_splitter.split_text(page_text)
+                for j, chunk in enumerate(chunks):
+                    doc = Document(
+                        page_content=f"[Page {page_num}]\n{chunk}",
+                        metadata={**base_metadata, "chunk": j, "page": page_num},
+                    )
+                    documents.append(doc)
 
         # Add to vector store
         self.vector_store.add_documents(documents)
@@ -285,8 +307,10 @@ Réponse :"""
         order: list[tuple[str, int]] = []
         for doc in docs:
             filename = doc.metadata.get("filename", "")
-            m = re.search(r"\[Page (\d+)\]", doc.page_content)
-            page = int(m.group(1)) if m else 1
+            page = doc.metadata.get("page")
+            if page is None:
+                m = re.search(r"\[Page (\d+)\]", doc.page_content)
+                page = int(m.group(1)) if m else 1
             text = re.sub(r"\[Page \d+\]\n?", "", doc.page_content).strip()
             snippet = text[:120].strip()
             key = (filename, page)
