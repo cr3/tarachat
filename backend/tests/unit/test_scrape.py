@@ -2,15 +2,16 @@
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from yarl import URL
 
 from tarachat.scrape import (
-    download_one,
+    Downloader,
     has_changed,
     load_metadata,
     meta_path_for,
+    sanitize_filename,
     save_metadata,
 )
 
@@ -79,12 +80,27 @@ class TestHasChanged:
         assert has_changed(meta, meta) is False
 
 
+class FakeDownloader(Downloader):
+    """A Downloader that performs no real I/O."""
+
+    def __init__(self, *, remote_meta=None, fetch_error=None):
+        self.remote_meta = remote_meta or {}
+        self.fetch_error = fetch_error
+        self.fetched: list[tuple] = []
+
+    async def fetch_metadata(self, session, url):
+        return self.remote_meta
+
+    async def fetch_content(self, session, url, file_path, **_kwargs):
+        if self.fetch_error:
+            raise self.fetch_error
+        self.fetched.append((url, file_path))
+        file_path.write_bytes(b"fake content")
+
+
 class TestDownloadOne:
     @pytest.mark.asyncio
     async def test_skips_unchanged(self, tmp_path):
-        """When local file exists and metadata matches, skip download."""
-        from yarl import URL
-
         url = URL("http://example.com/file.txt")
         file_path = tmp_path / "file.txt"
         file_path.write_text("existing", encoding="utf-8")
@@ -92,56 +108,54 @@ class TestDownloadOne:
         meta = {"etag": "abc", "last_modified": "Mon", "content_length": "8", "url": str(url)}
         save_metadata(file_path, meta)
 
-        session = MagicMock()
-        with patch("tarachat.scrape.fetch_remote_metadata", return_value=meta) as mock_fetch:
-            result = await download_one(session, url, tmp_path)
-
+        dl = FakeDownloader(remote_meta=meta)
+        result = await dl.download_one(None, url, tmp_path)
         assert result[2] == "skipped"
-        mock_fetch.assert_awaited_once_with(session, url)
 
     @pytest.mark.asyncio
     async def test_downloads_new_file(self, tmp_path):
-        """When file doesn't exist, download it."""
-        from yarl import URL
-
         url = URL("http://example.com/newfile.txt")
-        session = MagicMock()
-
-        # GET context manager
-        get_resp = AsyncMock()
-        get_resp.raise_for_status = MagicMock()
-        session.get = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=get_resp),
-                __aexit__=AsyncMock(return_value=False),
-            )
-        )
-
-        with (
-            patch("tarachat.scrape.fetch_remote_metadata", return_value={}),
-            patch("tarachat.scrape._write_response") as mock_write,
-        ):
-            result = await download_one(session, url, tmp_path)
-
+        dl = FakeDownloader()
+        result = await dl.download_one(None, url, tmp_path)
         assert result[2] == "downloaded"
-        mock_write.assert_awaited_once()
+        assert len(dl.fetched) == 1
 
     @pytest.mark.asyncio
     async def test_error_on_failed_download(self, tmp_path):
-        """When GET raises, return error status."""
-        from yarl import URL
-
         url = URL("http://example.com/fail.txt")
-        session = MagicMock()
-        session.get = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(side_effect=Exception("timeout")),
-                __aexit__=AsyncMock(return_value=False),
-            )
-        )
-
-        with patch("tarachat.scrape.fetch_remote_metadata", return_value={}):
-            result = await download_one(session, url, tmp_path)
-
+        dl = FakeDownloader(fetch_error=Exception("timeout"))
+        result = await dl.download_one(None, url, tmp_path)
         assert result[2] == "error"
         assert result[1] is None
+
+    @pytest.mark.asyncio
+    async def test_custom_filename_overrides_url_name(self, tmp_path):
+        url = URL("http://example.com/Rglement-07-296.pdf")
+        dl = FakeDownloader()
+        result = await dl.download_one(
+            None, url, tmp_path, filename="Règlement-07-296.pdf",
+        )
+        assert result[2] == "downloaded"
+        assert result[1] == str(tmp_path / "Règlement-07-296.pdf")
+
+
+class TestSanitizeFilename:
+    def test_preserves_accented_characters(self):
+        assert sanitize_filename("Règlement numéro 06", ".pdf") == "Règlement numéro 06.pdf"
+
+    def test_replaces_forbidden_characters(self):
+        assert sanitize_filename('a/b:c*d', '.txt') == 'a_b_c_d.txt'
+
+    def test_does_not_duplicate_extension(self):
+        assert sanitize_filename("readme.txt", ".txt") == "readme.txt"
+
+    def test_empty_text_gets_placeholder(self):
+        result = sanitize_filename("", ".pdf")
+        assert result == "_.pdf"
+
+    def test_no_extension(self):
+        assert sanitize_filename("hello world") == "hello world"
+
+    def test_fallback_when_only_dots(self):
+        result = sanitize_filename("...", ".pdf")
+        assert result == "_.pdf"
