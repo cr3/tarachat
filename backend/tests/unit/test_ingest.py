@@ -27,9 +27,8 @@ class FakeRAG:
         return FakeVectorStore()
 
 
-class FakePDF:
-    def extract_text_from_pdf(self, pdf_bytes: bytes) -> tuple[str, dict]:
-        return "pdf content", {"pages": 1}
+def _fake_read_pdf(pdf_bytes: bytes) -> tuple[str, dict]:
+    return "pdf content", {"pages": 1}
 
 
 @pytest.fixture()
@@ -38,13 +37,13 @@ def rag():
 
 
 @pytest.fixture()
-def pdf():
-    return FakePDF()
+def read_pdf():
+    return _fake_read_pdf
 
 
 @pytest.fixture()
-def manager(rag, pdf, tmp_path):
-    return DocumentManager(rag, pdf, db_path=tmp_path / "documents.db")
+def manager(rag, read_pdf, tmp_path):
+    return DocumentManager(rag, read_pdf, db_path=tmp_path / "documents.db")
 
 
 class TestAddDocument:
@@ -162,7 +161,7 @@ class TestClearAll:
 
 
 class TestMigrateFromJson:
-    def test_migrates_json_to_sqlite(self, rag, pdf, tmp_path):
+    def test_migrates_json_to_sqlite(self, rag, read_pdf, tmp_path):
         db_path = tmp_path / "vs" / "documents.db"
         json_path = tmp_path / "vs" / "documents_metadata.json"
         json_path.parent.mkdir(parents=True)
@@ -170,7 +169,7 @@ class TestMigrateFromJson:
             "doc1": {"metadata": {"source": "test"}, "content_length": 42}
         }))
 
-        manager = DocumentManager(rag, pdf, db_path=db_path)
+        manager = DocumentManager(rag, read_pdf, db_path=db_path)
         assert manager._doc_exists("doc1")
         assert not json_path.exists()
         assert json_path.with_suffix(".json.bak").exists()

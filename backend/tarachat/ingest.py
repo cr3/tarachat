@@ -7,10 +7,11 @@ import argparse
 import json
 import logging
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
+from tarachat import pdf
 from tarachat.config import get_settings
-from tarachat.pdf_processor import PDFProcessor, pdf_processor
 from tarachat.rag import RAGProtocol, RAGSystem, _detect_device
 
 logger = logging.getLogger(__name__)
@@ -19,9 +20,14 @@ logger = logging.getLogger(__name__)
 class DocumentManager:
     """Manages document ingestion and updates in the vector store using SQLite."""
 
-    def __init__(self, rag: RAGProtocol, pdf: PDFProcessor, db_path: Path):
+    def __init__(
+        self,
+        rag: RAGProtocol,
+        read_pdf: Callable[[bytes], tuple[str, dict]],
+        db_path: Path,
+    ):
         self.rag = rag
-        self.pdf = pdf
+        self.read_pdf = read_pdf
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -70,7 +76,7 @@ class DocumentManager:
         if file_path.suffix.lower() == '.pdf':
             with open(file_path, 'rb') as f:
                 pdf_bytes = f.read()
-            return self.pdf.extract_text_from_pdf(pdf_bytes)
+            return self.read_pdf(pdf_bytes)
         else:
             with open(file_path, encoding='utf-8') as f:
                 content = f.read()
@@ -335,7 +341,7 @@ def main():
     rag = RAGSystem.create(settings=settings, device=_detect_device())
 
     manager = DocumentManager(
-        rag, pdf_processor,
+        rag, pdf.extract_text,
         db_path=Path(settings.vector_store_path) / "documents.db",
     )
 
