@@ -15,12 +15,14 @@ from tarachat.rag import RAGSystem, _split_by_pages
 def rag(tmp_path):
     """RAGSystem with mock ML components."""
     settings = Settings(vector_store_path=str(tmp_path / "vs"))
+    tokenizer = MagicMock()
+    tokenizer.apply_chat_template.side_effect = lambda msgs, **kw: "\n".join(m["content"] for m in msgs)
     return RAGSystem(
         settings=settings,
         device="cpu",
         embeddings=MagicMock(),
         vector_store=MagicMock(),
-        tokenizer=MagicMock(),
+        tokenizer=tokenizer,
         model=MagicMock(),
     )
 
@@ -53,14 +55,14 @@ class TestBuildPrompt:
         result = rag._build_prompt("What is X?", docs)
         assert "Some context" in result
         assert "Question : What is X?" in result
-        assert "Réponse :" in result
-        # Few-shot example present
-        assert "largeur minimale" in result
 
     def test_prompt_without_history(self, rag):
         docs = [Document(page_content="ctx")]
-        result = rag._build_prompt("Q?", docs)
-        assert "Historique" not in result
+        rag._build_prompt("Q?", docs)
+        messages = rag.tokenizer.apply_chat_template.call_args[0][0]
+        assert len(messages) == 2  # system + user only
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
 
     def test_prompt_with_history(self, rag):
         docs = [Document(page_content="ctx")]
@@ -68,19 +70,20 @@ class TestBuildPrompt:
             ChatMessage(role="user", content="Hi"),
             ChatMessage(role="assistant", content="Hello"),
         ]
-        result = rag._build_prompt("Q?", docs, history)
-        assert "Historique :" in result
-        assert "Utilisateur: Hi" in result
-        assert "Assistant: Hello" in result
+        rag._build_prompt("Q?", docs, history)
+        messages = rag.tokenizer.apply_chat_template.call_args[0][0]
+        assert any(m["role"] == "user" and m["content"] == "Hi" for m in messages)
+        assert any(m["role"] == "assistant" and m["content"] == "Hello" for m in messages)
 
     def test_prompt_truncates_history_to_6(self, rag):
         docs = [Document(page_content="ctx")]
         history = [ChatMessage(role="user", content=f"msg{i}") for i in range(10)]
-        result = rag._build_prompt("Q?", docs, history)
-        # Only last 6 should appear
-        assert "msg4" in result
-        assert "msg9" in result
-        assert "msg3" not in result
+        rag._build_prompt("Q?", docs, history)
+        messages = rag.tokenizer.apply_chat_template.call_args[0][0]
+        contents = [m["content"] for m in messages]
+        assert any("msg4" in c for c in contents)
+        assert any("msg9" in c for c in contents)
+        assert not any("msg3" in c for c in contents)
 
     def test_multiple_docs_joined(self, rag):
         docs = [

@@ -80,7 +80,7 @@ def serve(
     pdf_path: Path,
     *,
     page: int | None = None,
-    num_pages: int = 20,
+    num_pages: int = 1,
     highlights: list[str] | None = None,
 ) -> bytes:
     """Read a PDF, optionally select pages around *page* and highlight text.

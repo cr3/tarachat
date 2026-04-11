@@ -5,12 +5,19 @@ import hashlib
 import json
 import logging
 import re
+from argparse import ArgumentParser
 from pathlib import Path
 
 import aiofiles
 import aiohttp
 from bs4 import BeautifulSoup
 from yarl import URL
+
+from tarachat.logger import (
+    LoggerHandlerAction,
+    LoggerLevelAction,
+    setup_logger,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,13 +233,28 @@ async def get_urls(url: URL, timeout: int = DEFAULT_TIMEOUT) -> list[tuple[URL, 
         return results
 
 
-async def _async_main():
+async def _async_main(target_dir: Path):
     url = URL("https://vplus.modellium.com/api/www.notre-dame-du-laus.ca/structure/detail/reglements?localisation=fr")
     url_filename_pairs = await get_urls(url)
-    target_dir = Path("data/documents")
     await Downloader().download_many(url_filename_pairs, target_dir)
 
 
-def main():
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(_async_main())
+def main(argv=None):
+    parser = ArgumentParser()
+    parser.add_argument(
+        "destination",
+        type=Path,
+    )
+    parser.add_argument(
+        "--log-file",
+        action=LoggerHandlerAction,
+    )
+    parser.add_argument(
+        "--log-level",
+        action=LoggerLevelAction,
+    )
+    args = parser.parse_args(argv)
+
+    setup_logger(args.log_level, args.log_file)
+
+    asyncio.run(_async_main(args.destination))

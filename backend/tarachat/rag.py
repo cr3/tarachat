@@ -250,12 +250,8 @@ class RAGSystem:
         query: str,
         context_docs: list[Document],
         conversation_history: list[dict] | None = None,
-    ) -> str:
-        """Build the LLM prompt from context, history, and query.
-
-        Uses a few-shot example so the completion model learns the expected
-        answer format instead of continuing the raw context text.
-        """
+    ):
+        """Build the LLM prompt from context, history, and query."""
         context_parts = []
         for doc in context_docs:
             ref = _source_ref(doc)
@@ -263,27 +259,22 @@ class RAGSystem:
             context_parts.append(f"[{ref}]: {text}")
         context = "\n\n".join(context_parts)
 
-        history_text = ""
+        system = (
+            "Tu es un assistant qui répond aux questions sur les règlements municipaux. "
+            "Réponds uniquement à partir du contexte fourni. "
+            "Cite tes sources sous la forme [fichier.pdf#page=N]."
+        )
+        user_content = f"Contexte :\n{context}\n\nQuestion : {query}"
+
+        messages = [{"role": "system", "content": system}]
         if conversation_history:
-            recent = conversation_history[-6:]
-            history_lines = []
-            for msg in recent:
-                role = "Utilisateur" if msg.role == "user" else "Assistant"
-                history_lines.append(f"{role}: {msg.content}")
-            history_text = "\nHistorique :\n" + "\n".join(history_lines) + "\n"
+            for msg in conversation_history[-6:]:
+                messages.append({"role": msg.role, "content": msg.content})
+        messages.append({"role": "user", "content": user_content})
 
-        # Few-shot example teaches the model the task format
-        return f"""Tu es un assistant qui répond aux questions sur les règlements municipaux. Réponds uniquement à partir du contexte. Cite tes sources.
-
-Question : Quelle est la largeur minimale d'un terrain?
-Contexte : [zonage.pdf#page=12]: La largeur minimale d'un terrain en zone résidentielle est de 30 mètres.
-Réponse : La largeur minimale d'un terrain en zone résidentielle est de 30 mètres [zonage.pdf#page=12].
-
-Question : {query}
-Contexte :
-{context}
-{history_text}
-Réponse :"""
+        return self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
 
     def _build_demo_response(self, docs: list[Document]) -> str:
         """Build a demo-mode response from retrieved documents (no LLM)."""
@@ -325,8 +316,7 @@ Réponse :"""
         ]
 
     def _tokenize_prompt(self, prompt: str) -> dict:
-        """Tokenize a prompt and move tensors to the target device."""
-        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=1024)
+        inputs = self.tokenizer(prompt, return_tensors="pt")
         return {k: v.to(self.device) for k, v in inputs.items()}
 
     def _generation_kwargs(self, inputs: dict, max_length: int) -> dict:
