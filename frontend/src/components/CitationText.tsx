@@ -24,9 +24,9 @@ function CitationText({ content, sources }: CitationTextProps) {
 
   // Assign a stable number to each unique citation ref
   const citationMap = new Map<string, number>();
-  CITATION_RE.lastIndex = 0;
+  const citationRe = new RegExp(CITATION_RE.source, 'g');
   let match: RegExpExecArray | null;
-  while ((match = CITATION_RE.exec(content)) !== null) {
+  while ((match = citationRe.exec(content)) !== null) {
     const ref = match[1];
     if (!citationMap.has(ref)) {
       citationMap.set(ref, citationMap.size + 1);
@@ -35,8 +35,7 @@ function CitationText({ content, sources }: CitationTextProps) {
 
   // Transform [file.pdf#page=N] into [N](citation://file.pdf#page=N) so
   // react-markdown can parse them as links while we intercept the render.
-  CITATION_RE.lastIndex = 0;
-  const transformed = content.replace(CITATION_RE, (_, ref) => {
+  const transformed = content.replace(new RegExp(CITATION_RE.source, 'g'), (_, ref) => {
     const num = citationMap.get(ref) ?? 0;
     return `[${num}](citation://${ref})`;
   });
