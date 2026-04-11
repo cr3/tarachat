@@ -51,6 +51,7 @@ check = [
 ]
 
 [project.scripts]
+tarachat = "tarachat.cli:main"
 tarachat-ingest = "tarachat.ingest:main"
 tarachat-scrape = "tarachat.scrape:main"
 
