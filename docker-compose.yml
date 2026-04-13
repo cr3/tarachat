@@ -6,21 +6,17 @@ services:
       - backend-cache:/root/.cache
       - backend-data:/app/vector_store
       - backend-docs:/app/data/documents
-    ulimits:
-      memlock: -1
-      stack: 67108864
-    runtime: nvidia
     environment:
+      NVIDIA_VISIBLE_DEVICES: all
       MODEL_NAME: ${MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-OrdalieTech/Solon-embeddings-large-0.1}
-      NVIDIA_VISIBLE_DEVICES: all
-      CHUNK_SIZE: ${CHUNK_SIZE:-512}
-      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-50}
       HF_TOKEN: ${HF_TOKEN:-}
-      MAX_TOKENS: ${MAX_TOKENS:-512}
-      TOP_K: ${TOP_K:-5}
+      CHUNK_SIZE: ${CHUNK_SIZE:-256}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-50}
+      TOP_K: ${TOP_K:-7}
       RERANKER_MODEL: ${RERANKER_MODEL:-}
-      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-20}
+      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-30}
+      MAX_TOKENS: ${MAX_TOKENS:-512}
     networks:
       default:
         aliases:
@@ -32,6 +28,10 @@ services:
       start_period: 60s
       interval: 10s
       timeout: 5s
+    runtime: nvidia
+    ulimits:
+      memlock: -1
+      stack: 67108864
 
   certbot:
     image: certbot/certbot:v5.5.0
@@ -41,12 +41,12 @@ services:
       - certbot-www:/var/www/html
     environment:
       SERVER_HOSTNAME: ${SERVER_HOSTNAME}
-    entrypoint: ""
     command: >
       sh -c "trap exit TERM; while :; do
         certbot renew --webroot --webroot-path=/var/www/html --deploy-hook /deploy-hook.sh;
         sleep 12h;
       done"
+    entrypoint: ""
     restart: always
     healthcheck:
       test: [ "CMD", "test", "-e", "/etc/letsencrypt/live/fullchain.pem" ]
