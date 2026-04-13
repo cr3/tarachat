@@ -486,6 +486,11 @@ class RAGPipeline:
                 device="cpu",
             ))
 
+        logger.info("Warming up model...")
+        with torch.inference_mode():
+            dummy = tokenizer("Bonjour", return_tensors="pt").to(device)
+            model.generate(**dummy, max_new_tokens=1, pad_token_id=tokenizer.eos_token_id)
+
         logger.info("RAG pipeline initialized successfully")
         return cls(
             settings=settings,
