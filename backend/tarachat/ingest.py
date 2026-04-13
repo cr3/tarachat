@@ -186,15 +186,7 @@ class DocumentManager:
 
     def clear_all(self):
         """Clear all documents from the vector store."""
-        logger.warning("This will delete ALL documents from the vector store!")
-        response = input("Are you sure? (yes/no): ")
-
-        if response.lower() != 'yes':
-            logger.info("Cancelled")
-            return
-
         logger.info("Clearing vector store...")
-
         self.rag.reset_vector_store()
 
         with sqlite3.connect(self.db_path) as conn:

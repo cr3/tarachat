@@ -137,17 +137,10 @@ class TestAddFromDirectory:
 
 
 class TestClearAll:
-    def test_clear(self, manager, monkeypatch):
+    def test_clear_all(self, manager):
         manager.add_document("doc1", "content")
-        monkeypatch.setattr("builtins.input", lambda _: "yes")
         manager.clear_all()
         assert not manager._doc_exists("doc1")
-
-    def test_clear_cancelled(self, manager, monkeypatch):
-        manager.add_document("doc1", "content")
-        monkeypatch.setattr("builtins.input", lambda _: "no")
-        manager.clear_all()
-        assert manager._doc_exists("doc1")
 
 
 class TestMigrateFromJson:
