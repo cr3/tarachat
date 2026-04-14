@@ -57,38 +57,4 @@ describe('MessageBubble', () => {
     expect(screen.queryByText(/Sources/)).not.toBeInTheDocument()
   })
 
-  it('renders inline citation buttons for assistant messages with citation markers', () => {
-    const msg: Message = {
-      ...baseMessage,
-      role: 'assistant',
-      content: 'The answer is here [doc.pdf#page=5] and more [other.pdf#page=2].',
-      sources: [
-        { filename: 'doc.pdf', page: 5, highlights: ['answer'] },
-        { filename: 'other.pdf', page: 2, highlights: ['more'] },
-      ],
-    }
-    const { container } = render(<MessageBubble message={msg} />)
-    const citations = container.querySelectorAll('.inline-citation')
-    expect(citations).toHaveLength(2)
-    expect(citations[0].textContent).toBe('1')
-    expect(citations[1].textContent).toBe('2')
-  })
-
-  it('assigns the same number to duplicate citation references', () => {
-    const msg: Message = {
-      ...baseMessage,
-      role: 'assistant',
-      content: 'First [a.pdf#page=1] then [b.pdf#page=2] and again [a.pdf#page=1].',
-      sources: [
-        { filename: 'a.pdf', page: 1, highlights: ['first'] },
-        { filename: 'b.pdf', page: 2, highlights: ['then'] },
-      ],
-    }
-    const { container } = render(<MessageBubble message={msg} />)
-    const citations = container.querySelectorAll('.inline-citation')
-    expect(citations).toHaveLength(3)
-    expect(citations[0].textContent).toBe('1')
-    expect(citations[1].textContent).toBe('2')
-    expect(citations[2].textContent).toBe('1')
-  })
 })

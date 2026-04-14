@@ -1,6 +1,6 @@
+import ReactMarkdown from 'react-markdown';
 import { Message } from '../types';
 import { SourceLink } from './PdfViewer';
-import CitationText from './CitationText';
 import './MessageBubble.css';
 
 interface MessageBubbleProps {
@@ -12,7 +12,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
     <div className={`message-bubble ${message.role === 'user' ? 'user' : 'assistant'}`}>
       <div className="message-content">
         <div className="message-text">
-          <CitationText content={message.content} sources={message.sources} />
+          <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
         {message.sources && message.sources.length > 0 && (
           <div className="message-sources">
