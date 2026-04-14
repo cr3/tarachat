@@ -1,9 +1,9 @@
 
+import json
 import logging
 import re
 from collections.abc import Generator
 from pathlib import Path
-from threading import Thread
 from typing import Any, Protocol, runtime_checkable
 
 import faiss
@@ -15,13 +15,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    StoppingCriteria,
-    StoppingCriteriaList,
-    TextIteratorStreamer,
-)
 
 from tarachat.config import Settings
 
@@ -39,22 +32,6 @@ _NO_ANSWER = (
     "Je n'ai pas trouvé d'informations pertinentes dans les documents "
     "pour répondre à cette question."
 )
-
-
-class _StopOnPhrase(StoppingCriteria):
-    """Stop generation when the decoded tail contains any stop phrase."""
-
-    def __init__(self, tokenizer: AutoTokenizer, stop_phrases: list[str]) -> None:
-        self._tokenizer = tokenizer
-        self._stop_phrases = stop_phrases
-        self._check_len = max(
-            len(tokenizer.encode(p, add_special_tokens=False)) + 2
-            for p in stop_phrases
-        )
-
-    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs: Any) -> bool:
-        tail = self._tokenizer.decode(input_ids[0, -self._check_len:], skip_special_tokens=True)
-        return any(p in tail for p in self._stop_phrases)
 
 
 @runtime_checkable
@@ -268,126 +245,76 @@ class Retriever:
         return retriever
 
 
+_SYSTEM_PROMPT = (
+    "Tu es un assistant qui répond aux questions sur les règlements municipaux de Notre-Dame-du-Laus. "
+    "Réponds UNIQUEMENT en te basant sur les extraits fournis dans le contexte. "
+    "N'utilise jamais tes propres connaissances générales. "
+    "Si la réponse ne se trouve pas dans les extraits, dis-le explicitement. "
+    "Réponds en français, de façon concise et directe."
+)
+
+
 @define
 class PromptBuilder:
     """Assembles the LLM prompt from context documents and conversation history."""
 
     settings: Settings
-    tokenizer: Any
 
     def build(
         self,
         query: str,
         context_docs: list[Document],
         conversation_history: list[dict] | None = None,
-    ) -> str:
-        """Build a tokenizer-formatted prompt string."""
-        context_parts = []
-        for doc in context_docs:
-            ref = _source_ref(doc)
-            context_parts.append(f"[{ref}]: {doc.page_content}")
-        context = "\n\n".join(context_parts)
-
-        system = (
-            "Tu es un assistant qui répond aux questions sur les règlements municipaux de Notre-Dame-du-Laus. "
-            "Réponds UNIQUEMENT à partir des extraits fournis dans le contexte. "
-            "N'utilise jamais tes propres connaissances générales. "
-            "Cite tes sources sous la forme [fichier.pdf#page=N] après chaque affirmation. "
-            "Si le contexte ne contient pas la réponse, dis-le explicitement."
+    ) -> list[dict]:
+        """Build the messages list for Ollama."""
+        context = "\n\n".join(
+            f"[{_source_ref(doc)}]: {doc.page_content}" for doc in context_docs
         )
         user_content = f"Contexte :\n{context}\n\nQuestion : {query}"
-
-        messages = [{"role": "system", "content": system}]
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
         if conversation_history:
-            history_size = self.settings.conversation_history_size
-            for msg in conversation_history[-history_size:]:
-                messages.append({"role": msg.role, "content": msg.content})
+            for msg in conversation_history[-self.settings.conversation_history_size:]:
+                role = msg["role"] if isinstance(msg, dict) else msg.role
+                content = msg["content"] if isinstance(msg, dict) else msg.content
+                messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_content})
-
-        return self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+        return messages
 
 
 @define
-class LLMGenerator:
-    """Streams tokens from a causal language model."""
+class OllamaGenerator:
+    """Streams tokens from an Ollama-served model via its /api/chat endpoint."""
 
     settings: Settings
-    tokenizer: Any
-    model: Any
-    device: str
 
-    def stream(self, prompt: str) -> Generator[str, None, None]:
-        """Generate a streaming response, yielding tokens as they are produced."""
-        max_length = self.settings.max_tokens
-        inputs = self._tokenize(prompt)
-
-        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        kwargs = {**self._generation_kwargs(inputs, max_length), "streamer": streamer}
-
-        thread = Thread(target=self.model.generate, kwargs=kwargs)
-        thread.start()
-
-        buffer = ""
-        max_hold = max(len(p) for p in _STOP_PHRASES)
-        for token in streamer:
-            buffer += token
-            hit = next((p for p in _STOP_PHRASES if p in buffer), None)
-            if hit:
-                clean = buffer[: buffer.index(hit)].rstrip()
-                if clean:
-                    yield clean
-                break
-            safe = len(buffer) - max_hold
-            if safe > 0:
-                yield buffer[:safe]
-                buffer = buffer[safe:]
-        else:
-            if buffer.strip():
-                yield buffer.strip()
-
-        thread.join()
-
-    def demo_response(self, docs: list[Document]) -> str:
-        """Build a demo-mode response from retrieved documents (no LLM)."""
-        if docs:
-            parts = []
-            for doc in docs[:2]:
-                ref = _source_ref(doc)
-                snippet = doc.page_content[:300].strip()
-                parts.append(f"{snippet} [{ref}]")
-            return "Voici ce que j'ai trouvé dans les documents:\n\n" + "\n\n".join(parts)
-        return (
-            "Désolé, je n'ai pas trouvé d'informations pertinentes dans la base "
-            "de connaissances pour répondre à votre question."
-        )
-
-    def _tokenize(self, prompt: str) -> dict:
-        raw_max = self.tokenizer.model_max_length
-        max_length = raw_max if raw_max < 1_000_000 else 4096
-        inputs = self.tokenizer(
-            prompt,
-            return_tensors="pt",
-            truncation=True,
-            max_length=max_length,
-        )
-        return {k: v.to(self.device) for k, v in inputs.items()}
-
-    def _generation_kwargs(self, inputs: dict, max_length: int) -> dict:
-        return {
-            **inputs,
-            "max_new_tokens": max_length,
-            "temperature": 0.3,
-            "top_p": 0.85,
-            "do_sample": True,
-            "num_beams": 1,
-            "repetition_penalty": 1.2,
-            "pad_token_id": self.tokenizer.eos_token_id,
-            "stopping_criteria": StoppingCriteriaList([
-                _StopOnPhrase(self.tokenizer, _STOP_PHRASES),
-            ]),
+    def stream(self, messages: list[dict]) -> Generator[str, None, None]:
+        """Send *messages* to Ollama and yield content tokens as they arrive."""
+        import httpx
+        payload = {
+            "model": self.settings.ollama_model,
+            "messages": messages,
+            "stream": True,
+            "options": {
+                "num_predict": self.settings.max_tokens,
+                "num_ctx": 2048,
+                "temperature": 0,
+                "repeat_penalty": 1.2,
+                "stop": _STOP_PHRASES,
+            },
         }
+        url = f"{self.settings.ollama_url}/api/chat"
+        with httpx.Client(timeout=300) as client:
+            with client.stream("POST", url, json=payload) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("done"):
+                        break
+                    content = data.get("message", {}).get("content", "")
+                    if content:
+                        yield content
 
 
 @define
@@ -462,30 +389,15 @@ class RAGPipeline:
 
         embeddings, text_splitter, retriever = cls._load_embeddings_and_retriever(settings, device)
 
-        logger.info(f"Loading language model: {settings.model_name}")
-        tokenizer = AutoTokenizer.from_pretrained(settings.model_name)
-        model = AutoModelForCausalLM.from_pretrained(
-            settings.model_name,
-            dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map="auto" if device == "cuda" else None,
-            low_cpu_mem_usage=True,
-        )
-        if device == "cpu":
-            model = model.to(device)
-
         reranker = None
         if settings.reranker_model:
             from sentence_transformers import CrossEncoder
             logger.info(f"Loading reranker model: {settings.reranker_model}")
-            reranker = Reranker(model=CrossEncoder(
-                settings.reranker_model,
-                device="cpu",
-            ))
+            reranker = Reranker(model=CrossEncoder(settings.reranker_model, device="cpu"))
 
-        logger.info("Warming up model...")
-        with torch.inference_mode():
-            dummy = tokenizer("Bonjour", return_tensors="pt").to(device)
-            model.generate(**dummy, max_new_tokens=1, pad_token_id=tokenizer.eos_token_id)
+        logger.info(f"Using Ollama model: {settings.ollama_model} at {settings.ollama_url}")
+        generator = OllamaGenerator(settings=settings)
+        prompt_builder = PromptBuilder(settings=settings)
 
         logger.info("RAG pipeline initialized successfully")
         return cls(
@@ -493,13 +405,8 @@ class RAGPipeline:
             text_splitter=text_splitter,
             embeddings=embeddings,
             retriever=retriever,
-            prompt_builder=PromptBuilder(settings=settings, tokenizer=tokenizer),
-            generator=LLMGenerator(
-                settings=settings,
-                tokenizer=tokenizer,
-                model=model,
-                device=device,
-            ),
+            prompt_builder=prompt_builder,
+            generator=generator,
             reranker=reranker,
         )
 
@@ -567,7 +474,18 @@ class RAGPipeline:
 
         if self.settings.demo_mode:
             logger.info("Using demo mode (fast RAG-only responses)")
-            yield {"type": "token", "content": self.generator.demo_response(docs)}
+            if docs:
+                parts = [
+                    f"[{i+1}/{len(docs)}] [{_source_ref(doc)}]:\n{doc.page_content.strip()}"
+                    for i, doc in enumerate(docs)
+                ]
+                demo_content = "Voici ce que j'ai trouvé dans les documents:\n\n" + "\n\n---\n\n".join(parts)
+            else:
+                demo_content = (
+                    "Désolé, je n'ai pas trouvé d'informations pertinentes dans la base "
+                    "de connaissances pour répondre à votre question."
+                )
+            yield {"type": "token", "content": demo_content}
             yield {"type": "sources", "sources": sources}
             return
 
@@ -578,11 +496,7 @@ class RAGPipeline:
             return
 
         logger.info("Using full LLM mode with streaming")
-        prompt = self.prompt_builder.build(message, docs, conversation_history)
-        for token in self.generator.stream(prompt):
+        messages = self.prompt_builder.build(message, docs, conversation_history)
+        for token in self.generator.stream(messages):
             yield {"type": "token", "content": token}
         yield {"type": "sources", "sources": sources}
-
-
-# Backward-compatible alias: app.py and ingest.py can keep importing RAGSystem
-RAGSystem = RAGPipeline

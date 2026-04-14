@@ -2,21 +2,26 @@ name: tarachat
 services:
   backend:
     build: backend
+    depends_on:
+      ollama:
+        condition: service_healthy
     volumes:
       - backend-cache:/root/.cache
       - backend-data:/app/vector_store
       - backend-docs:/app/data/documents
     environment:
       NVIDIA_VISIBLE_DEVICES: all
-      MODEL_NAME: ${MODEL_NAME:-Qwen/Qwen2.5-0.5B-Instruct}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-OrdalieTech/Solon-embeddings-large-0.1}
       HF_TOKEN: ${HF_TOKEN:-}
-      CHUNK_SIZE: ${CHUNK_SIZE:-256}
-      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-50}
-      TOP_K: ${TOP_K:-7}
+      CHUNK_SIZE: ${CHUNK_SIZE:-512}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-256}
+      TOP_K: ${TOP_K:-3}
       RERANKER_MODEL: ${RERANKER_MODEL:-}
-      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-30}
+      RERANK_CANDIDATES: ${RERANK_CANDIDATES:-10}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+      OLLAMA_URL: ${OLLAMA_URL:-http://tarachat-ollama:11434}
       MAX_TOKENS: ${MAX_TOKENS:-512}
+      DEMO_MODE: ${DEMO_MODE:-0}
     networks:
       default:
         aliases:
@@ -89,6 +94,30 @@ services:
           - tarachat-nginx
     restart: always
 
+  ollama:
+    image: dustynv/ollama:r36.4.0
+    volumes:
+      - ollama-models:/data/models/ollama/models
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MODELS: /data/models/ollama/models
+    networks:
+      default:
+        aliases:
+          - tarachat-ollama
+    command: ollama serve
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+    runtime: nvidia
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
 networks:
   default:
     driver: bridge
@@ -105,4 +134,4 @@ volumes:
   backend-docs:
   certbot-www:
   certbot-certs:
-
+  ollama-models:

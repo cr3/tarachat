@@ -8,7 +8,6 @@ from langchain_core.documents import Document
 from tarachat.config import Settings
 from tarachat.models import ChatMessage
 from tarachat.rag import (
-    LLMGenerator,
     PromptBuilder,
     RAGPipeline,
     Reranker,
@@ -31,25 +30,17 @@ def retriever(settings):
 
 @pytest.fixture
 def prompt_builder(settings):
-    tokenizer = MagicMock()
-    tokenizer.apply_chat_template.side_effect = lambda msgs, **kw: "\n".join(m["content"] for m in msgs)
-    return PromptBuilder(settings=settings, tokenizer=tokenizer)
+    return PromptBuilder(settings=settings)
 
 
 @pytest.fixture
-def llm_generator(settings):
-    return LLMGenerator(settings=settings, tokenizer=MagicMock(), model=MagicMock(), device="cpu")
-
-
-@pytest.fixture
-def pipeline(settings, retriever, prompt_builder, llm_generator):
+def pipeline(settings, retriever, prompt_builder):
     return RAGPipeline(
         settings=settings,
         text_splitter=MagicMock(**{"split_text.side_effect": lambda text: [text]}),
         embeddings=MagicMock(),
         retriever=retriever,
         prompt_builder=prompt_builder,
-        generator=llm_generator,
     )
 
 
@@ -222,17 +213,17 @@ class TestRetriever:
 class TestPromptBuilder:
     def test_basic_prompt(self, prompt_builder):
         docs = [Document(page_content="Some context")]
-        result = prompt_builder.build("What is X?", docs)
-        assert "Some context" in result
-        assert "Question : What is X?" in result
+        messages = prompt_builder.build("What is X?", docs)
+        user_content = messages[-1]["content"]
+        assert "Some context" in user_content
+        assert "Question : What is X?" in user_content
 
     def test_prompt_without_history(self, prompt_builder):
         docs = [Document(page_content="ctx")]
-        prompt_builder.build("Q?", docs)
-        messages = prompt_builder.tokenizer.apply_chat_template.call_args[0][0]
+        messages = prompt_builder.build("Q?", docs)
         assert len(messages) == 2  # system + user only
         assert messages[0]["role"] == "system"
-        assert messages[1]["role"] == "user"
+        assert messages[-1]["role"] == "user"
 
     def test_prompt_with_history(self, prompt_builder):
         docs = [Document(page_content="ctx")]
@@ -240,16 +231,14 @@ class TestPromptBuilder:
             ChatMessage(role="user", content="Hi"),
             ChatMessage(role="assistant", content="Hello"),
         ]
-        prompt_builder.build("Q?", docs, history)
-        messages = prompt_builder.tokenizer.apply_chat_template.call_args[0][0]
+        messages = prompt_builder.build("Q?", docs, history)
         assert any(m["role"] == "user" and m["content"] == "Hi" for m in messages)
         assert any(m["role"] == "assistant" and m["content"] == "Hello" for m in messages)
 
     def test_prompt_truncates_history(self, prompt_builder):
         docs = [Document(page_content="ctx")]
         history = [ChatMessage(role="user", content=f"msg{i}") for i in range(10)]
-        prompt_builder.build("Q?", docs, history)
-        messages = prompt_builder.tokenizer.apply_chat_template.call_args[0][0]
+        messages = prompt_builder.build("Q?", docs, history)
         contents = [m["content"] for m in messages]
         assert any("msg4" in c for c in contents)
         assert any("msg9" in c for c in contents)
@@ -260,35 +249,11 @@ class TestPromptBuilder:
             Document(page_content="First doc"),
             Document(page_content="Second doc"),
         ]
-        result = prompt_builder.build("Q?", docs)
-        assert "First doc" in result
-        assert "Second doc" in result
+        messages = prompt_builder.build("Q?", docs)
+        user_content = messages[-1]["content"]
+        assert "First doc" in user_content
+        assert "Second doc" in user_content
 
-
-class TestLLMGenerator:
-    def test_demo_response_with_docs(self, llm_generator):
-        docs = [Document(page_content="Important content here")]
-        result = llm_generator.demo_response(docs)
-        assert "Important content here" in result
-        assert "trouvé" in result
-
-    def test_demo_response_with_two_docs(self, llm_generator):
-        docs = [
-            Document(page_content="First"),
-            Document(page_content="Second"),
-        ]
-        result = llm_generator.demo_response(docs)
-        assert "First" in result
-        assert "Second" in result
-
-    def test_demo_response_no_docs(self, llm_generator):
-        result = llm_generator.demo_response([])
-        assert "Désolé" in result
-
-    def test_demo_response_long_doc_truncated(self, llm_generator):
-        docs = [Document(page_content="x" * 500)]
-        result = llm_generator.demo_response(docs)
-        assert len(result) < 500
 
 
 class TestReranker:

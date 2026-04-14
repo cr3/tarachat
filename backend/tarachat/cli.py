@@ -7,7 +7,7 @@ import sys
 
 from tarachat.config import get_settings
 from tarachat.models import ChatMessage
-from tarachat.rag import RAGSystem, _detect_device
+from tarachat.rag import RAGPipeline, _detect_device
 
 
 def _ask(rag, query: str, history: list[ChatMessage]) -> str:
@@ -48,7 +48,7 @@ def main():
 
     settings = get_settings()
     print("Loading RAG system...", flush=True)
-    rag = RAGSystem.create(settings=settings, device=_detect_device())
+    rag = RAGPipeline.create(settings=settings, device=_detect_device())
 
     if args.prompt:
         _ask(rag, args.prompt, [])

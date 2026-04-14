@@ -10,7 +10,7 @@ from fastapi.responses import Response, StreamingResponse
 from tarachat import pdf
 from tarachat.config import get_settings
 from tarachat.models import ChatRequest, HealthResponse
-from tarachat.rag import RAGProtocol, RAGSystem, _detect_device
+from tarachat.rag import RAGProtocol, RAGPipeline, _detect_device
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def get_rag_system(request: Request) -> RAGProtocol:
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the FastAPI app."""
     if not hasattr(app.state, "rag"):  # pragma: no cover
-        app.state.rag = RAGSystem.create(
+        app.state.rag = RAGPipeline.create(
             settings=get_settings(), device=_detect_device(),
         )
     yield

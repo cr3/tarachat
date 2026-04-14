@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
 
     # Model Configuration
-    model_name: str = "Qwen/Qwen2.5-0.5B-Instruct"
     embedding_model: str = "OrdalieTech/Solon-embeddings-large-0.1"
 
     # RAG Configuration
@@ -26,6 +25,10 @@ class Settings(BaseSettings):
     # Reranking Configuration
     reranker_model: str | None = None  # None = disabled; e.g. "antoinelouis/crossencoder-camembert-base-mmarcoFR"
     rerank_candidates: int = 30  # candidates to retrieve before reranking (must be >= top_k)
+
+    # Ollama Configuration
+    ollama_model: str = "qwen2.5:3b"
+    ollama_url: str = "http://ollama:11434"
 
     # Performance Configuration
     demo_mode: bool = False  # Set to True for fast responses without LLM (testing/development)

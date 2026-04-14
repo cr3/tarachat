@@ -12,7 +12,7 @@ from pathlib import Path
 
 from tarachat import pdf
 from tarachat.config import get_settings
-from tarachat.rag import RAGProtocol, RAGSystem, _detect_device
+from tarachat.rag import RAGProtocol, RAGPipeline, _detect_device
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +324,7 @@ def main():
 
     settings = get_settings()
     logger.info("Initializing RAG system...")
-    rag = RAGSystem.create_for_ingest(settings=settings, device=_detect_device())
+    rag = RAGPipeline.create_for_ingest(settings=settings, device=_detect_device())
 
     manager = DocumentManager(
         rag, pdf.extract_text,
