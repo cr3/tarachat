@@ -21,7 +21,7 @@ With Docker (Recommended)
 .. code-block:: bash
 
    cd ..
-   docker-compose up backend
+   docker compose up backend
 
 Local Development
 ~~~~~~~~~~~~~~~~~

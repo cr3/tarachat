@@ -28,7 +28,15 @@ check: $(NODE_MODULES)
 	@echo "==> Linting docker compose files..."
 	@npm run lint
 
-COMPOSE_DEV = docker compose -f docker-compose.yml -f docker-compose.dev.yml
+COMPOSE_DEV = docker compose -f compose.yml -f compose.dev.yml
+
+.PHONY: dev
+dev:
+	@$(COMPOSE_DEV) up -d
+	@echo ""
+	@echo "Application started! (development)"
+	@echo "Frontend: https://localhost"
+	@echo "API Docs: https://localhost/api/docs"
 
 .PHONY: deploy
 deploy:
@@ -48,14 +56,6 @@ undeploy:
 	@echo "==> Stopping services..."
 	@docker compose down
 	@echo "==> Services stopped"
-
-.PHONY: dev
-dev:
-	@$(COMPOSE_DEV) up -d
-	@echo ""
-	@echo "Application started! (development)"
-	@echo "Frontend: https://localhost"
-	@echo "API Docs: https://localhost/api/docs"
 
 .PHONY: clean
 clean:

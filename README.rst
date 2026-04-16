@@ -1,15 +1,13 @@
-TaraChat - RAG Chatbot with CroissantLLM
-=========================================
+TaraChat - RAG Chatbot
+======================
 
-A full-stack chatbot application implementing **Retrieval-Augmented Generation (RAG)**
-using **CroissantLLM**, a French-optimized language model.
+A full-stack chatbot application implementing **Retrieval-Augmented Generation (RAG)**.
 
 Features
 --------
 
 - **Backend**: FastAPI-based REST API with RAG implementation
 - **Frontend**: React + TypeScript chat interface with modern UI
-- **LLM**: CroissantLLM for French/multilingual support
 - **Vector Store**: FAISS for efficient similarity search
 - **Document Upload**: Add text documents or PDF files to enhance knowledge base
 - **PDF Support**: Automatic text extraction from PDF files with metadata
@@ -23,10 +21,10 @@ Quick Start
 .. code-block:: bash
 
    # Start the application
-   docker-compose up --build
+   docker compose up --build
 
    # Wait for "RAG system initialized successfully" in logs
-   docker-compose logs -f backend
+   docker compose logs -f backend
 
 **Access the application:**
 
@@ -63,38 +61,22 @@ Frontend
 - **Vite** - Fast build tool
 - **Axios** - HTTP client
 
-Project Structure
------------------
-
-::
-
-   tarachat/
-   ├── backend/           # FastAPI backend
-   │   ├── tarachat/      # Application code
-   │   └── data/          # Sample documents
-   │
-   ├── frontend/          # React frontend
-   │   └── src/           # Source code
-   │       └── components/  # React components
-   │
-   └── docker-compose.yml  # Orchestration
-
 Key Commands
 ------------
 
 .. code-block:: bash
 
    # Start application
-   docker-compose up -d
+   docker compose up -d
 
    # View logs
-   docker-compose logs -f
+   docker compose logs -f
 
    # Stop application
-   docker-compose down
+   docker compose down
 
    # Clean everything (including data)
-   docker-compose down -v
+   docker compose down -v
 
 Or use the Makefile:
 
@@ -167,7 +149,7 @@ Troubleshooting
 
 **Connection refused**: Wait for both containers to start, check logs
 
-**Frontend can't connect**: Verify both services running with ``docker-compose ps``
+**Frontend can't connect**: Verify both services running with ``docker compose ps``
 
 Resources
 ---------
