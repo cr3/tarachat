@@ -15,9 +15,11 @@ class ComposeService:
     """Compose service.
 
     :param name: Name of the compose service container.
+    :param network: Network name to use when resolving the IP address.
     """
 
     name: str
+    network: str | None = None
 
     @property
     def container(self):
@@ -35,8 +37,10 @@ class ComposeService:
     @property
     def ip(self):
         network_settings = self.container.inspect["NetworkSettings"]
-        network = only(network_settings["Networks"].values())
-        return network["IPAddress"]
+        networks = network_settings["Networks"]
+        if self.network and self.network in networks:
+            return networks[self.network]["IPAddress"]
+        return only(networks.values())["IPAddress"]
 
     @property
     def started_at(self):
@@ -46,7 +50,7 @@ class ComposeService:
 
 class ComposeServer(ProcessServer):
     def __init__(self, pattern, project="test", env_file=None, compose_files=None, timeout=180, **kwargs):
-        """Initialize a compose server."""
+        """Initilize a compose server."""
         super().__init__(**kwargs)
         self.pattern = pattern
         self.project = project
@@ -82,7 +86,7 @@ class ComposeServer(ProcessServer):
 
     @contextmanager
     def run(self, name):
-        """Return a `ComposeService` to the running service."""
+        """Return an `ComposeService` to the running service."""
         with super().run(name):
             full_name = self.full_name(name)
-            yield ComposeService(full_name)
+            yield ComposeService(full_name, network=f"{self.project}_default")
