@@ -6,10 +6,7 @@ authors = [
     {name = "Marc Tardif", email = "marc@taram.ca"},
 ]
 readme = "README.rst"
-repository = "https://github.com/taradix/tarachat"
-packages = [
-    {include = "tarachat"},
-]
+
 requires-python = ">=3.10,<4.0"
 dependencies = [
     "accelerate>=1.7.0,<2.0.0",
@@ -38,6 +35,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+
 test = [
     "attrs>=26.1.0,<26.2.0",
     "coverage>=7.2.3,<8.0.0",
@@ -51,14 +49,17 @@ check = [
     "ruff>=0.15.0,<1.0.0",
 ]
 
+[project.entry-points."pytest11"]
+tarachat = "tarachat.testing.fixtures"
+tarachat-services = "tarachat.testing.services"
+
 [project.scripts]
 tarachat = "tarachat.cli:main"
 tarachat-ingest = "tarachat.ingest:main"
 tarachat-scrape = "tarachat.scrape:main"
 
-[project.entry-points."pytest11"]
-tarachat = "tarachat.testing.fixtures"
-tarachat-services = "tarachat.testing.services"
+[project.urls]
+Repository = "https://github.com/taradix/tarachat"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -68,7 +69,9 @@ build-backend = "hatchling.build"
 target-version = "py310"
 line-length = 120
 fix = true
-lint.select = [
+
+[tool.ruff.lint]
+select = [
     # flake8-2020
     "YTT",
     # flake8-bandit
@@ -100,7 +103,7 @@ lint.select = [
     # tryceratops
     "TRY",
 ]
-lint.ignore = [
+ignore = [
     # LineTooLong
     "E501",
     # Create your own exception
@@ -143,5 +146,7 @@ show_missing = true
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["tarachat"]
+source = [
+    "tarachat",
+]
 omit = ["tarachat/testing/*"]
